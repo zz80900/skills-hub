@@ -20,6 +20,7 @@ frontend/dist/
 frontend/.npm-cache/
 frontend/.vite/
 *.sqlite3
+backend/tests/test.db
 .DS_Store
 .idea/
 *.log
