@@ -12,10 +12,7 @@ const emit = defineEmits(['select'])
 <template>
   <button type="button" class="skill-card skill-card--button" @click="emit('select', skill.name)">
     <div class="skill-card__top">
-      <div>
-        <span class="skill-card__eyebrow">Skill</span>
-        <h3>{{ skill.name }}</h3>
-      </div>
+      <h3>{{ skill.name }}</h3>
       <span class="skill-card__badge">查看详情</span>
     </div>
     <div class="skill-card__description" v-html="skill.description_html"></div>
