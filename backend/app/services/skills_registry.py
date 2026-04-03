@@ -139,8 +139,7 @@ def _build_summary_html(source: str, installs: int | None) -> str:
     lines = [f"<p>来源仓库：<code>{escape(source)}</code></p>"]
     if installs is not None:
         lines.append(f"<p>累计安装：{installs}</p>")
-    else:
-        lines.append("<p>点击查看详情后复制兼容 skills.sh 的安装命令。</p>")
+
     return "".join(lines)
 
 
