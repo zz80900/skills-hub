@@ -260,6 +260,7 @@ def to_public_skill_summary(skill: Skill) -> dict[str, Any]:
         "description_html": skill.description_html,
         "install_command": get_install_command(skill.name),
         "installs": None,
+        "version": skill.current_version,
     }
 
 

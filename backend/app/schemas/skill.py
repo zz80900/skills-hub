@@ -13,6 +13,7 @@ class PublicSkillSummary(BaseModel):
     description_html: str
     install_command: str
     installs: int | None = None
+    version: str | None = None
 
 
 class SkillListResponse(BaseModel):

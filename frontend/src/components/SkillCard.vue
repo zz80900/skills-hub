@@ -16,6 +16,7 @@ const emit = defineEmits(['select'])
         <h3 class="skill-card__name">
           <span class="skill-card__meta">{{ skill.source_label }}</span>
           <span class="skill-card__name-text">{{ skill.name }}</span>
+          <span v-if="skill.version" class="skill-card__version">{{ skill.version }}</span>
         </h3>
       </div>
       <span class="skill-card__badge">
