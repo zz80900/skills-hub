@@ -8,7 +8,7 @@ from app.db.base import Base
 SKILL_COLUMNS = {
     "contributor": "ALTER TABLE skills ADD COLUMN contributor VARCHAR(128)",
     "current_version": "ALTER TABLE skills ADD COLUMN current_version VARCHAR(16) NOT NULL DEFAULT '1.0.0'",
-    "deleted_at": "ALTER TABLE skills ADD COLUMN deleted_at DATETIME",
+    "deleted_at": "ALTER TABLE skills ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE",
 }
 
 
