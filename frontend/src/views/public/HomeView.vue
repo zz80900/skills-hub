@@ -331,7 +331,7 @@ onBeforeUnmount(() => {
           <div class="skill-section__header">
             <div>
               <p class="eyebrow">skills.sh</p>
-              <h2>官方 Agent Skills</h2>
+
             </div>
             <p class="skill-section__summary">{{ remoteTabSummary }}</p>
           </div>
