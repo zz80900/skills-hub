@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from sqlalchemy import inspect, text
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
@@ -22,6 +23,7 @@ from fastapi.testclient import TestClient
 
 from app.api import public as public_api
 from app.db.base import Base
+from app.db.schema import ensure_schema_compatibility
 from app.db.session import engine
 from app.main import app
 from app.services import nexus as nexus_service
@@ -112,6 +114,30 @@ def test_create_and_search_skill(client: TestClient, monkeypatch):
     assert "package_url" not in payload["local_items"][0]
 
 
+def test_create_skill_stores_optional_contributor(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+
+    response = client.post(
+        "/api/admin/skills",
+        headers=auth_headers(client),
+        files={"zip_file": ("plm-assistant.zip", make_zip("# skill"), "application/zip")},
+        data={
+            "name": "plm-assistant",
+            "description_markdown": "PLM 工具 Skill",
+            "contributor": "平台研发组",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["contributor"] == "平台研发组"
+
+    list_response = client.get("/api/admin/skills", headers=auth_headers(client))
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["contributor"] == "平台研发组"
+
+
 def test_upgrade_skill(client: TestClient, monkeypatch):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
@@ -122,7 +148,7 @@ def test_upgrade_skill(client: TestClient, monkeypatch):
         "/api/admin/skills",
         headers=auth_headers(client),
         files={"zip_file": ("demo-upgrade.zip", make_zip("# first"), "application/zip")},
-        data={"name": "demo-upgrade", "description_markdown": "old"},
+        data={"name": "demo-upgrade", "description_markdown": "old", "contributor": "旧贡献者"},
     )
     assert create_response.status_code == 201
 
@@ -130,11 +156,37 @@ def test_upgrade_skill(client: TestClient, monkeypatch):
         "/api/admin/skills/demo-upgrade",
         headers=auth_headers(client),
         files={"zip_file": ("demo-upgrade.zip", make_zip("# second"), "application/zip")},
-        data={"description_markdown": "new description"},
+        data={"description_markdown": "new description", "contributor": "", "contributor_submitted": "true"},
     )
     assert update_response.status_code == 200
     assert update_response.json()["description_markdown"] == "new description"
+    assert update_response.json()["contributor"] is None
     assert "package_url" not in update_response.json()
+
+
+def test_schema_compatibility_adds_contributor_column_for_existing_skills_table():
+    Base.metadata.drop_all(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE skills (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(64) NOT NULL UNIQUE,
+                    description_markdown TEXT NOT NULL DEFAULT '',
+                    description_html TEXT NOT NULL DEFAULT '',
+                    package_url VARCHAR(512) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    ensure_schema_compatibility(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("skills")}
+    assert "contributor" in columns
 
 
 def test_public_skills_groups_local_and_remote_results(client: TestClient, monkeypatch):

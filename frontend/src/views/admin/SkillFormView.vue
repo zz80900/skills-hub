@@ -14,6 +14,7 @@ const error = ref('')
 const selectedFileName = ref('')
 const form = reactive({
   name: '',
+  contributor: '',
   description_markdown: '',
   zip_file: null,
 })
@@ -33,6 +34,7 @@ async function loadSkill() {
   try {
     const skill = await fetchAdminSkill(route.params.name)
     form.name = skill.name
+    form.contributor = skill.contributor || ''
     form.description_markdown = skill.description_markdown
   } catch (err) {
     error.value = err.message
@@ -46,6 +48,8 @@ async function handleSubmit() {
   error.value = ''
   try {
     const payload = new FormData()
+    payload.append('contributor', form.contributor.trim())
+    payload.append('contributor_submitted', 'true')
     payload.append('description_markdown', form.description_markdown)
 
     if (isEditMode.value) {
@@ -101,6 +105,16 @@ onMounted(() => {
           </label>
 
           <label class="field">
+            <span>贡献者（可选）</span>
+            <input
+              v-model="form.contributor"
+              class="text-input"
+              type="text"
+              placeholder="例如：张三 / 平台研发组"
+            />
+          </label>
+
+          <label class="field">
             <span>Skill 描述（Markdown）</span>
             <textarea
               v-model="form.description_markdown"
@@ -129,4 +143,3 @@ onMounted(() => {
     </main>
   </div>
 </template>
-

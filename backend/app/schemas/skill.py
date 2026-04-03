@@ -43,6 +43,7 @@ class AdminSkillSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str
+    contributor: str | None = None
     description_html: str
     install_command: str
     created_at: datetime

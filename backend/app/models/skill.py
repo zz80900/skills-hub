@@ -13,6 +13,7 @@ class Skill(Base):
     name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     description_markdown: Mapped[str] = mapped_column(Text, nullable=False, default="")
     description_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    contributor: Mapped[str | None] = mapped_column(String(128), nullable=True)
     package_url: Mapped[str] = mapped_column(String(512), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -25,4 +26,3 @@ class Skill(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-

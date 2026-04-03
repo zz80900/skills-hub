@@ -16,6 +16,11 @@ PUBLIC_SOURCE_LOCAL = "local"
 PUBLIC_SOURCE_LOCAL_LABEL = "本地库"
 
 
+def normalize_optional_text(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized or None
+
+
 def validate_skill_name(name: str) -> str:
     normalized_name = (name or "").strip()
     if not SKILL_NAME_PATTERN.fullmatch(normalized_name):
@@ -90,11 +95,18 @@ def get_skill_by_name(session: Session, name: str) -> Skill | None:
     return session.scalar(statement)
 
 
-def create_skill(session: Session, name: str, description_markdown: str, package_url: str) -> Skill:
+def create_skill(
+    session: Session,
+    name: str,
+    description_markdown: str,
+    package_url: str,
+    contributor: str | None = None,
+) -> Skill:
     skill = Skill(
         name=name,
         description_markdown=description_markdown,
         description_html=render_markdown(description_markdown),
+        contributor=normalize_optional_text(contributor),
         package_url=package_url,
     )
     session.add(skill)
@@ -103,12 +115,20 @@ def create_skill(session: Session, name: str, description_markdown: str, package
     return skill
 
 
-def update_skill(session: Session, skill: Skill, description_markdown: str | None, package_url: str | None) -> Skill:
+def update_skill(
+    session: Session,
+    skill: Skill,
+    description_markdown: str | None,
+    package_url: str | None,
+    contributor: str | None = None,
+) -> Skill:
     if description_markdown is not None:
         skill.description_markdown = description_markdown
         skill.description_html = render_markdown(description_markdown)
     if package_url is not None:
         skill.package_url = package_url
+    if contributor is not None:
+        skill.contributor = normalize_optional_text(contributor)
     session.add(skill)
     session.commit()
     session.refresh(skill)
@@ -118,6 +138,7 @@ def update_skill(session: Session, skill: Skill, description_markdown: str | Non
 def to_skill_summary(skill: Skill) -> dict:
     return {
         "name": skill.name,
+        "contributor": skill.contributor,
         "description_html": skill.description_html,
         "install_command": get_install_command(skill.name),
         "created_at": skill.created_at,
@@ -152,6 +173,7 @@ def to_public_skill_detail(skill: Skill) -> dict:
 def to_admin_skill_detail(skill: Skill) -> dict:
     return {
         "name": skill.name,
+        "contributor": skill.contributor,
         "description_markdown": skill.description_markdown,
         "description_html": skill.description_html,
         "install_command": get_install_command(skill.name),

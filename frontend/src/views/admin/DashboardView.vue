@@ -145,6 +145,7 @@ function clearSearch() {
         <article v-for="skill in skills" :key="skill.name" class="admin-list__item">
           <div>
             <h2>{{ skill.name }}</h2>
+            <p v-if="skill.contributor" class="admin-list__meta">贡献者：{{ skill.contributor }}</p>
             <div class="admin-list__description" v-html="skill.description_html"></div>
           </div>
           <div class="admin-list__actions">

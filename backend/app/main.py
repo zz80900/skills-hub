@@ -13,12 +13,14 @@ from app.api.admin import router as admin_router
 from app.api.public import router as public_router
 from app.core.config import get_settings
 from app.db.base import Base
+from app.db.schema import ensure_schema_compatibility
 from app.db.session import engine
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     Base.metadata.create_all(bind=engine)
+    ensure_schema_compatibility(engine)
     yield
 
 

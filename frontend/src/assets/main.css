@@ -951,6 +951,12 @@ pre {
   margin-bottom: 12px;
 }
 
+.admin-list__meta {
+  margin: 0 0 12px;
+  color: var(--text-soft);
+  font-size: 0.92rem;
+}
+
 .admin-search {
   margin-top: 20px;
   padding: 24px;
