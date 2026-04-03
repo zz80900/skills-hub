@@ -53,8 +53,8 @@ export function clearToken() {
   window.localStorage.removeItem(TOKEN_KEY)
 }
 
-export function fetchSkills(query) {
-  return request(buildUrl('/api/skills', { q: query }))
+export function fetchSkills(query, options = {}) {
+  return request(buildUrl('/api/skills', { q: query, page: options.page, page_size: options.pageSize }))
 }
 
 export function fetchSkill(source, slug) {

@@ -20,6 +20,9 @@ class SkillListResponse(BaseModel):
     remote_items: list[PublicSkillSummary]
     cli_install_command: str
     remote_error: str | None = None
+    remote_page: int = 1
+    remote_page_size: int = 12
+    remote_has_more: bool = False
 
 
 class PublicSkillDetail(BaseModel):

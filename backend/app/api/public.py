@@ -24,7 +24,12 @@ router = APIRouter(prefix="/api", tags=["public"])
 
 
 @router.get("/skills", response_model=SkillListResponse)
-async def list_skills(session: DbSession, q: str | None = Query(default=None, description="搜索关键词")):
+async def list_skills(
+    session: DbSession,
+    q: str | None = Query(default=None, description="搜索关键词"),
+    page: int = Query(default=1, ge=1, description="skills.sh 页码"),
+    page_size: int = Query(default=12, ge=1, le=48, description="skills.sh 每页条数"),
+):
     settings = get_settings()
     local_items = [
         PublicSkillSummary.model_validate(to_local_public_skill_summary(skill))
@@ -33,10 +38,12 @@ async def list_skills(session: DbSession, q: str | None = Query(default=None, de
 
     remote_items: list[PublicSkillSummary] = []
     remote_error: str | None = None
+    remote_has_more = False
     try:
+        remote_results, remote_has_more = await search_remote_skills(q, page=page, page_size=page_size)
         remote_items = [
             PublicSkillSummary.model_validate(to_remote_public_skill_summary(skill))
-            for skill in await search_remote_skills(q)
+            for skill in remote_results
         ]
     except Exception:
         remote_error = "skills.sh 数据暂时不可用，请稍后重试。"
@@ -46,6 +53,9 @@ async def list_skills(session: DbSession, q: str | None = Query(default=None, de
         remote_items=remote_items,
         cli_install_command=settings.cli_install_command,
         remote_error=remote_error,
+        remote_page=page,
+        remote_page_size=page_size,
+        remote_has_more=remote_has_more,
     )
 
 

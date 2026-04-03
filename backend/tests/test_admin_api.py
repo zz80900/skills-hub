@@ -91,8 +91,8 @@ def test_create_and_search_skill(client: TestClient, monkeypatch):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
 
-    async def fake_search_remote_skills(query: str | None, limit: int = 12):
-        return []
+    async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
+        return [], False
 
     monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
     monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
@@ -141,7 +141,9 @@ def test_public_skills_groups_local_and_remote_results(client: TestClient, monke
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
 
-    async def fake_search_remote_skills(query: str | None, limit: int = 12):
+    async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
+        assert page == 1
+        assert page_size == 12
         return [
             RegistrySkillSummary(
                 slug="vercel-labs/agent-skills/frontend-design",
@@ -151,7 +153,7 @@ def test_public_skills_groups_local_and_remote_results(client: TestClient, monke
                 description_html="<p>来源仓库：<code>vercel-labs/agent-skills</code></p>",
                 install_command='ssc-skills add vercel-labs/agent-skills --as --skill "frontend-design"',
             )
-        ]
+        ], True
 
     monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
     monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
@@ -173,6 +175,7 @@ def test_public_skills_groups_local_and_remote_results(client: TestClient, monke
     assert payload["remote_items"][0]["source"] == "skills_sh"
     assert payload["remote_items"][0]["install_command"].startswith("ssc-skills add vercel-labs/agent-skills --as")
     assert payload["remote_error"] is None
+    assert payload["remote_has_more"] is True
 
 
 def test_public_remote_detail_uses_source_and_slug(client: TestClient, monkeypatch):
@@ -202,7 +205,7 @@ def test_public_remote_failure_does_not_break_local_results(client: TestClient, 
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
 
-    async def fake_search_remote_skills(query: str | None, limit: int = 12):
+    async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
         raise RuntimeError("skills.sh unavailable")
 
     monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
@@ -222,3 +225,30 @@ def test_public_remote_failure_does_not_break_local_results(client: TestClient, 
     assert payload["local_items"][0]["name"] == "demo-skill"
     assert payload["remote_items"] == []
     assert payload["remote_error"] == "skills.sh 数据暂时不可用，请稍后重试。"
+
+
+def test_public_remote_pagination_uses_page_arguments(client, monkeypatch):
+    async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
+        assert query == "design"
+        assert page == 2
+        assert page_size == 6
+        return [
+            RegistrySkillSummary(
+                slug="vercel-labs/agent-skills/ui-ux-pro-max",
+                name="ui-ux-pro-max",
+                source="vercel-labs/agent-skills",
+                installs=999,
+                description_html="<p>Remote summary</p>",
+                install_command='ssc-skills add vercel-labs/agent-skills --as --skill "ui-ux-pro-max"',
+            )
+        ], False
+
+    monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
+
+    response = client.get("/api/skills", params={"q": "design", "page": 2, "page_size": 6})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["remote_page"] == 2
+    assert payload["remote_page_size"] == 6
+    assert payload["remote_has_more"] is False
+    assert payload["remote_items"][0]["slug"] == "vercel-labs/agent-skills/ui-ux-pro-max"

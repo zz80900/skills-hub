@@ -115,6 +115,12 @@ def build_remote_install_command(source: str, skill_name: str) -> str:
     return f'ssc-skills add {source} --as --skill "{skill_name}"'
 
 
+def _paginate(items: list[RegistrySkillSummary], page: int, page_size: int) -> tuple[list[RegistrySkillSummary], bool]:
+    start = max(page - 1, 0) * page_size
+    end = start + page_size
+    return items[start:end], end < len(items)
+
+
 def _normalize_remote_record(slug: str, source: str, name: str, installs: int | None = None) -> RegistrySkillSummary:
     normalized_source = source.strip().strip("/")
     normalized_name = name.strip() or slug.split("/")[-1]
@@ -223,15 +229,21 @@ async def _request_text(url: str) -> str:
         return response.text
 
 
-async def search_remote_skills(query: str | None, limit: int = DEFAULT_SEARCH_LIMIT) -> list[RegistrySkillSummary]:
+async def search_remote_skills(
+    query: str | None,
+    page: int = 1,
+    page_size: int = DEFAULT_SEARCH_LIMIT,
+) -> tuple[list[RegistrySkillSummary], bool]:
     settings = get_settings()
     keyword = (query or "").strip()
     if not keyword:
-        return await list_remote_skills(limit=limit)
+        return await list_remote_skills(page=page, page_size=page_size)
 
+    capped_page = max(page, 1)
+    capped_page_size = max(page_size, 1)
     payload = await _request_json(
         f"{settings.skills_api_base_url.rstrip('/')}/api/search",
-        params={"q": keyword, "limit": limit},
+        params={"q": keyword, "limit": capped_page * capped_page_size},
     )
     skills = payload.get("skills") or []
 
@@ -249,10 +261,13 @@ async def search_remote_skills(query: str | None, limit: int = DEFAULT_SEARCH_LI
                 installs=int(item.get("installs") or 0),
             )
         )
-    return items
+    return _paginate(items, capped_page, capped_page_size)
 
 
-async def list_remote_skills(limit: int = DEFAULT_SEARCH_LIMIT) -> list[RegistrySkillSummary]:
+async def list_remote_skills(
+    page: int = 1,
+    page_size: int = DEFAULT_SEARCH_LIMIT,
+) -> tuple[list[RegistrySkillSummary], bool]:
     settings = get_settings()
     html = await _request_text(settings.skills_api_base_url.rstrip("/"))
     parser = SkillsHomepageParser()
@@ -272,9 +287,7 @@ async def list_remote_skills(limit: int = DEFAULT_SEARCH_LIMIT) -> list[Registry
                 name=item["name"],
             )
         )
-        if len(items) >= limit:
-            break
-    return items
+    return _paginate(items, max(page, 1), max(page_size, 1))
 
 
 async def get_remote_skill_detail(slug: str) -> RegistrySkillDetail:
