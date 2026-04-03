@@ -5,7 +5,7 @@ from app.api.deps import DbSession, get_current_admin
 from app.core.config import get_settings
 from app.core.security import create_access_token
 from app.schemas.auth import LoginRequest, LoginResponse, MessageResponse
-from app.schemas.skill import AdminSkillDetail, SkillSummary
+from app.schemas.skill import AdminSkillDetail, AdminSkillSummary
 from app.services import nexus as nexus_service
 from app.services.skill_service import (
     create_skill,
@@ -35,9 +35,9 @@ def logout(_: str = Depends(get_current_admin)):
     return MessageResponse(message="已退出登录")
 
 
-@router.get("/skills", response_model=list[SkillSummary])
+@router.get("/skills", response_model=list[AdminSkillSummary])
 def list_admin_skills(session: DbSession, _: str = Depends(get_current_admin), q: str | None = None):
-    return [SkillSummary.model_validate(to_skill_summary(skill)) for skill in search_skills(session, q)]
+    return [AdminSkillSummary.model_validate(to_skill_summary(skill)) for skill in search_skills(session, q)]
 
 
 @router.get("/skills/{name}", response_model=AdminSkillDetail)
@@ -91,4 +91,3 @@ async def update_admin_skill(
 
     skill = update_skill(session, skill, description_markdown, package_url)
     return AdminSkillDetail.model_validate(to_admin_skill_detail(skill))
-

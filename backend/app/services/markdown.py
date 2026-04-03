@@ -13,6 +13,10 @@ allowed_attrs = {
 }
 
 
+def sanitize_html(content: str) -> str:
+    return bleach.clean(content or "", tags=allowed_tags, attributes=allowed_attrs, strip=True)
+
+
 def render_markdown(content: str) -> str:
     html = markdown_parser.render(content or "")
-    return bleach.clean(html, tags=allowed_tags, attributes=allowed_attrs, strip=True)
+    return sanitize_html(html)

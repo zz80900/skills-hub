@@ -423,6 +423,31 @@ pre {
   gap: 14px;
 }
 
+.skill-section {
+  margin-top: 28px;
+}
+
+.skill-section__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 18px;
+}
+
+.skill-section__header h2 {
+  margin: 8px 0 0;
+  color: #112337;
+  font-family: var(--font-sans);
+  font-size: clamp(1.35rem, 2vw, 1.7rem);
+  line-height: 1.2;
+}
+
+.skill-section__summary {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.95rem;
+}
+
 .skill-card {
   padding: 18px 20px;
   border-radius: 18px;
@@ -444,12 +469,30 @@ pre {
   gap: 12px;
 }
 
+.skill-card__title {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .skill-card__top h3 {
   margin: 0;
   flex: 1 1 auto;
   min-width: 0;
   font-size: 1.1rem;
   line-height: 1.35;
+}
+
+.skill-card__meta {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(22, 48, 70, 0.08);
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .skill-card__badge {
@@ -649,6 +692,10 @@ pre {
 
 .detail-meta__item a {
   color: var(--brand);
+  word-break: break-all;
+}
+
+.detail-meta__item code {
   word-break: break-all;
 }
 
@@ -872,13 +919,15 @@ small {
   .search-panel--home,
   .admin-search,
   .admin-toolbar,
-  .admin-list__item {
+  .admin-list__item,
+  .skill-section__header {
     grid-template-columns: 1fr;
     display: grid;
   }
 
   .admin-toolbar,
-  .admin-list__item {
+  .admin-list__item,
+  .skill-section__header {
     align-items: stretch;
   }
 }

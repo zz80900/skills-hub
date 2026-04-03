@@ -15,7 +15,7 @@ async function loadSkill(name) {
   loading.value = true
   error.value = ''
   try {
-    skill.value = await fetchSkill(name)
+    skill.value = await fetchSkill('local', name)
   } catch (err) {
     error.value = err.message
     skill.value = null
@@ -48,12 +48,7 @@ watch(
         </div>
 
         <div class="detail-meta">
-          <CommandSnippet label="CLI 安装" :command="skill.cli_install_command" />
           <CommandSnippet label="Skill 安装" :command="skill.install_command" />
-          <div class="detail-meta__item">
-            <span>ZIP 下载</span>
-            <a :href="skill.package_url" target="_blank" rel="noreferrer">{{ skill.package_url }}</a>
-          </div>
         </div>
 
         <article class="markdown-body" v-html="skill.description_html"></article>

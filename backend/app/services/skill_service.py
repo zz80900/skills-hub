@@ -12,6 +12,8 @@ from app.services.nexus import build_package_url
 
 
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+PUBLIC_SOURCE_LOCAL = "local"
+PUBLIC_SOURCE_LOCAL_LABEL = "本地库"
 
 
 def validate_skill_name(name: str) -> str:
@@ -125,6 +127,26 @@ def to_skill_summary(skill: Skill) -> dict:
 
 def to_skill_detail(skill: Skill) -> dict:
     return to_skill_summary(skill)
+
+
+def to_public_skill_summary(skill: Skill) -> dict:
+    return {
+        "source": PUBLIC_SOURCE_LOCAL,
+        "source_label": PUBLIC_SOURCE_LOCAL_LABEL,
+        "slug": skill.name,
+        "name": skill.name,
+        "description_html": skill.description_html,
+        "install_command": get_install_command(skill.name),
+        "installs": None,
+    }
+
+
+def to_public_skill_detail(skill: Skill) -> dict:
+    return {
+        **to_public_skill_summary(skill),
+        "detail_url": None,
+        "source_repository": None,
+    }
 
 
 def to_admin_skill_detail(skill: Skill) -> dict:

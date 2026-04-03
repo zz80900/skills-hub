@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:5173"]
     )
+    skills_api_base_url: str = "https://skills.sh"
+    skills_api_timeout_seconds: float = 15.0
     cli_install_command: str = (
         'npm install @xgd/ssc-skills -g --registry "http://nexus.example.invalid:8081/repository/npm-all"'
     )

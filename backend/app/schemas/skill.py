@@ -3,22 +3,40 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
-class SkillSummary(BaseModel):
+class PublicSkillSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    source: str
+    source_label: str
+    slug: str
     name: str
     description_html: str
     install_command: str
-    created_at: datetime
-    updated_at: datetime
+    installs: int | None = None
 
 
 class SkillListResponse(BaseModel):
-    items: list[SkillSummary]
+    local_items: list[PublicSkillSummary]
+    remote_items: list[PublicSkillSummary]
     cli_install_command: str
+    remote_error: str | None = None
 
 
-class SkillDetail(BaseModel):
+class PublicSkillDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    source: str
+    source_label: str
+    slug: str
+    name: str
+    description_html: str
+    install_command: str
+    installs: int | None = None
+    detail_url: str | None = None
+    source_repository: str | None = None
+
+
+class AdminSkillSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str
@@ -28,12 +46,7 @@ class SkillDetail(BaseModel):
     updated_at: datetime
 
 
-class AdminSkillDetail(BaseModel):
+class AdminSkillDetail(AdminSkillSummary):
     model_config = ConfigDict(from_attributes=True)
 
-    name: str
     description_markdown: str
-    description_html: str
-    install_command: str
-    created_at: datetime
-    updated_at: datetime

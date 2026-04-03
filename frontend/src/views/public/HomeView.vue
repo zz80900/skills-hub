@@ -13,14 +13,17 @@ const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const error = ref('')
+const remoteError = ref('')
 const search = ref('')
-const skills = ref([])
+const localSkills = ref([])
+const remoteSkills = ref([])
 const cliInstallCommand = ref('')
 const detailLoading = ref(false)
 const detailError = ref('')
 const selectedSkill = ref(null)
 let searchTimer = null
 let detailRequestId = 0
+
 const infoTabs = [
   { key: 'guide', label: '使用教程' },
   { key: 'cli', label: '安装 CLI' },
@@ -33,7 +36,12 @@ const isSkillModalOpen = computed(() => Boolean(route.query.skill))
 const isInfoModalOpen = computed(() => Boolean(activeInfoTab.value))
 const infoModalTitle = computed(() => (activeInfoTab.value === 'cli' ? '安装 CLI' : '使用教程'))
 const infoModalSummary = computed(() =>
-  activeInfoTab.value === 'cli' ? 'CLI 安装仅在这里集中展示，避免占用主页面空间。' : '按最少步骤完成安装、搜索和查看详情。',
+  activeInfoTab.value === 'cli'
+    ? '先安装 ssc-skills CLI，再通过首页复制具体 Skill 安装命令。'
+    : '一个搜索框同时检索本地库和 skills.sh，详情在当前页弹窗查看。',
+)
+const activeDetailSource = computed(() =>
+  typeof route.query.source === 'string' && route.query.source ? route.query.source : 'local',
 )
 
 function buildHomeQuery(overrides = {}) {
@@ -49,10 +57,13 @@ function buildHomeQuery(overrides = {}) {
 async function loadSkills(keyword = '') {
   loading.value = true
   error.value = ''
+  remoteError.value = ''
   try {
     const payload = await fetchSkills(keyword)
-    skills.value = payload.items
+    localSkills.value = payload.local_items || []
+    remoteSkills.value = payload.remote_items || []
     cliInstallCommand.value = payload.cli_install_command
+    remoteError.value = payload.remote_error || ''
   } catch (err) {
     error.value = err.message
   } finally {
@@ -60,13 +71,13 @@ async function loadSkills(keyword = '') {
   }
 }
 
-async function loadSkillDetail(name) {
+async function loadSkillDetail(source, slug) {
   const requestId = detailRequestId + 1
   detailRequestId = requestId
   detailLoading.value = true
   detailError.value = ''
   try {
-    const payload = await fetchSkill(name)
+    const payload = await fetchSkill(source, slug)
     if (detailRequestId !== requestId) {
       return
     }
@@ -92,17 +103,17 @@ function handleInfoTabSelect(tabKey) {
   })
 }
 
-function openSkillDetail(name) {
+function openSkillDetail(skill) {
   router.replace({
     name: 'home',
-    query: buildHomeQuery({ skill: name }),
+    query: buildHomeQuery({ skill: skill.slug, source: skill.source }),
   })
 }
 
 function closeSkillDetail() {
   router.replace({
     name: 'home',
-    query: buildHomeQuery({ skill: null }),
+    query: buildHomeQuery({ skill: null, source: null }),
   })
 }
 
@@ -121,10 +132,10 @@ watch(search, (value) => {
 })
 
 watch(
-  () => route.query.skill,
-  (name) => {
-    if (typeof name === 'string' && name) {
-      loadSkillDetail(name)
+  [() => route.query.skill, () => route.query.source],
+  ([slug, source]) => {
+    if (typeof slug === 'string' && slug) {
+      loadSkillDetail(typeof source === 'string' && source ? source : 'local', slug)
       return
     }
     detailRequestId += 1
@@ -151,10 +162,10 @@ onBeforeUnmount(() => {
       <section class="search-panel search-panel--home">
         <label class="search-field search-field--inline" for="skill-search">
           <span class="search-field__label search-field__label--inline">
-            搜索 Skill，支持名称、用途和关键描述词。
+            搜索 Skill，统一检索本地库与 skills.sh。
           </span>
           <span class="search-field__hint">
-            {{ search ? `当前关键词：${search}` : '输入后自动筛选' }}
+            {{ search ? `当前关键词：${search}` : '输入后自动筛选两套来源' }}
           </span>
           <input
             id="skill-search"
@@ -165,19 +176,59 @@ onBeforeUnmount(() => {
           />
         </label>
       </section>
+
       <section v-if="error" class="feedback feedback--error">{{ error }}</section>
       <section v-else-if="loading" class="feedback">正在加载 Skills...</section>
-      <section v-else-if="!skills.length" class="feedback">没有匹配的 Skill。</section>
+      <template v-else>
+        <section class="skill-section">
+          <div class="skill-section__header">
+            <div>
+              <p class="eyebrow">本地库</p>
+              <h2>内部 Skills</h2>
+            </div>
+            <p class="skill-section__summary">
+              {{ search ? `匹配 ${localSkills.length} 个结果` : `当前共 ${localSkills.length} 个 Skill` }}
+            </p>
+          </div>
+          <section v-if="!localSkills.length" class="feedback">
+            {{ search ? `本地库没有找到与“${search}”匹配的 Skill。` : '本地库当前还没有 Skill。' }}
+          </section>
+          <section v-else class="skills-grid">
+            <SkillCard v-for="skill in localSkills" :key="`${skill.source}:${skill.slug}`" :skill="skill" @select="openSkillDetail" />
+          </section>
+        </section>
 
-      <section v-else class="skills-grid">
-        <SkillCard v-for="skill in skills" :key="skill.name" :skill="skill" @select="openSkillDetail" />
-      </section>
+        <section class="skill-section">
+          <div class="skill-section__header">
+            <div>
+              <p class="eyebrow">skills.sh</p>
+              <h2>官方 Agent Skills</h2>
+            </div>
+            <p class="skill-section__summary">
+              {{ search ? `匹配 ${remoteSkills.length} 个结果` : `当前展示 ${remoteSkills.length} 个热门 Skill` }}
+            </p>
+          </div>
+          <section v-if="remoteError" class="feedback feedback--error">{{ remoteError }}</section>
+          <section v-else-if="!remoteSkills.length" class="feedback">
+            {{ search ? `skills.sh 没有找到与“${search}”匹配的 Skill。` : '当前未获取到 skills.sh Skill。' }}
+          </section>
+          <section v-else class="skills-grid">
+            <SkillCard
+              v-for="skill in remoteSkills"
+              :key="`${skill.source}:${skill.slug}`"
+              :skill="skill"
+              @select="openSkillDetail"
+            />
+          </section>
+        </section>
+      </template>
     </main>
     <SkillDetailModal
       :open="isSkillModalOpen"
       :loading="detailLoading"
       :error="detailError"
       :skill="selectedSkill"
+      :source="activeDetailSource"
       @close="closeSkillDetail"
     />
     <InfoModal
@@ -188,8 +239,8 @@ onBeforeUnmount(() => {
       @close="closeInfoModal"
     >
       <ol v-if="activeInfoTab === 'guide'" class="info-modal__list">
-        <li>先在顶部点击“安装 CLI”，复制并执行 CLI 安装命令。</li>
-        <li>回到主页列表，通过搜索框按名称或用途筛选 Skill。</li>
+        <li>先点击“安装 CLI”，复制并执行 ssc-skills CLI 安装命令。</li>
+        <li>回到主页，通过搜索框统一检索本地库和 skills.sh。</li>
         <li>点击任意 Skill 卡片，在当前页弹出层中查看说明与安装命令。</li>
       </ol>
       <CommandSnippet

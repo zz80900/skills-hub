@@ -20,10 +20,12 @@ os.environ["NEXUS_PASSWORD"] = "tester"
 
 from fastapi.testclient import TestClient
 
+from app.api import public as public_api
 from app.db.base import Base
 from app.db.session import engine
 from app.main import app
 from app.services import nexus as nexus_service
+from app.services.skills_registry import RegistrySkillDetail, RegistrySkillSummary
 
 
 def make_zip(skill_md_content: str) -> bytes:
@@ -89,7 +91,11 @@ def test_create_and_search_skill(client: TestClient, monkeypatch):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
 
+    async def fake_search_remote_skills(query: str | None, limit: int = 12):
+        return []
+
     monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+    monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
 
     response = client.post(
         "/api/admin/skills",
@@ -102,8 +108,8 @@ def test_create_and_search_skill(client: TestClient, monkeypatch):
     search_response = client.get("/api/skills", params={"q": "PLM"})
     assert search_response.status_code == 200
     payload = search_response.json()
-    assert payload["items"][0]["name"] == "plm-assistant"
-    assert "package_url" not in payload["items"][0]
+    assert payload["local_items"][0]["name"] == "plm-assistant"
+    assert "package_url" not in payload["local_items"][0]
 
 
 def test_upgrade_skill(client: TestClient, monkeypatch):
@@ -129,3 +135,90 @@ def test_upgrade_skill(client: TestClient, monkeypatch):
     assert update_response.status_code == 200
     assert update_response.json()["description_markdown"] == "new description"
     assert "package_url" not in update_response.json()
+
+
+def test_public_skills_groups_local_and_remote_results(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    async def fake_search_remote_skills(query: str | None, limit: int = 12):
+        return [
+            RegistrySkillSummary(
+                slug="vercel-labs/agent-skills/frontend-design",
+                name="frontend-design",
+                source="vercel-labs/agent-skills",
+                installs=1234,
+                description_html="<p>来源仓库：<code>vercel-labs/agent-skills</code></p>",
+                install_command='ssc-skills add vercel-labs/agent-skills --as --skill "frontend-design"',
+            )
+        ]
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+    monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
+
+    create_response = client.post(
+        "/api/admin/skills",
+        headers=auth_headers(client),
+        files={"zip_file": ("plm-assistant.zip", make_zip("# skill"), "application/zip")},
+        data={"name": "plm-assistant", "description_markdown": "PLM 工具 Skill"},
+    )
+    assert create_response.status_code == 201
+
+    response = client.get("/api/skills", params={"q": "plm"})
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["local_items"][0]["name"] == "plm-assistant"
+    assert payload["local_items"][0]["source"] == "local"
+    assert payload["remote_items"][0]["source"] == "skills_sh"
+    assert payload["remote_items"][0]["install_command"].startswith("ssc-skills add vercel-labs/agent-skills --as")
+    assert payload["remote_error"] is None
+
+
+def test_public_remote_detail_uses_source_and_slug(client: TestClient, monkeypatch):
+    async def fake_remote_detail(slug: str):
+        assert slug == "vercel-labs/agent-skills/frontend-design"
+        return RegistrySkillDetail(
+            slug=slug,
+            name="frontend-design",
+            source="vercel-labs/agent-skills",
+            installs=4321,
+            description_html="<p>Remote detail</p>",
+            install_command='ssc-skills add vercel-labs/agent-skills --as --skill "frontend-design"',
+            detail_url="https://skills.sh/vercel-labs/agent-skills/frontend-design",
+        )
+
+    monkeypatch.setattr(public_api, "get_remote_skill_detail", fake_remote_detail)
+
+    response = client.get("/api/skills/skills_sh/vercel-labs/agent-skills/frontend-design")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "skills_sh"
+    assert payload["source_repository"] == "vercel-labs/agent-skills"
+    assert payload["install_command"] == 'ssc-skills add vercel-labs/agent-skills --as --skill "frontend-design"'
+
+
+def test_public_remote_failure_does_not_break_local_results(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    async def fake_search_remote_skills(query: str | None, limit: int = 12):
+        raise RuntimeError("skills.sh unavailable")
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+    monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
+
+    create_response = client.post(
+        "/api/admin/skills",
+        headers=auth_headers(client),
+        files={"zip_file": ("demo.zip", make_zip("# skill"), "application/zip")},
+        data={"name": "demo-skill", "description_markdown": "local detail"},
+    )
+    assert create_response.status_code == 201
+
+    response = client.get("/api/skills")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["local_items"][0]["name"] == "demo-skill"
+    assert payload["remote_items"] == []
+    assert payload["remote_error"] == "skills.sh 数据暂时不可用，请稍后重试。"

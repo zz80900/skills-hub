@@ -57,8 +57,8 @@ export function fetchSkills(query) {
   return request(buildUrl('/api/skills', { q: query }))
 }
 
-export function fetchSkill(name) {
-  return request(buildUrl(`/api/skills/${name}`))
+export function fetchSkill(source, slug) {
+  return request(buildUrl(`/api/skills/${source}/${slug}`))
 }
 
 export function login(payload) {

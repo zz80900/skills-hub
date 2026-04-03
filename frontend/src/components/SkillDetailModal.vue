@@ -20,6 +20,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  source: {
+    type: String,
+    default: 'local',
+  },
 })
 
 const emit = defineEmits(['close'])
@@ -76,11 +80,21 @@ onBeforeUnmount(() => {
               <div>
                 <p class="eyebrow">Skill 详情</p>
                 <h2>{{ skill.name }}</h2>
+                <p class="detail-modal__summary">
+                  {{ skill.source_label || (source === 'skills_sh' ? 'skills.sh' : '本地库') }}
+                </p>
               </div>
             </div>
 
             <div class="detail-modal__meta">
               <CommandSnippet label="Skill 安装" :command="skill.install_command" compact />
+              <div v-if="skill.source_repository || skill.detail_url" class="detail-meta__item">
+                <span>来源信息</span>
+                <code v-if="skill.source_repository">{{ skill.source_repository }}</code>
+                <a v-if="skill.detail_url" :href="skill.detail_url" target="_blank" rel="noreferrer">
+                  在 skills.sh 打开原始详情
+                </a>
+              </div>
             </div>
 
             <article class="markdown-body detail-modal__body" v-html="skill.description_html"></article>
