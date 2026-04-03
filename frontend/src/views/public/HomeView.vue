@@ -7,7 +7,7 @@ import InfoModal from '../../components/InfoModal.vue'
 import SiteHeader from '../../components/SiteHeader.vue'
 import SkillCard from '../../components/SkillCard.vue'
 import SkillDetailModal from '../../components/SkillDetailModal.vue'
-import { fetchSkill, fetchSkills } from '../../services/api'
+import { fetchLocalSkillVersion, fetchSkill, fetchSkills } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -56,6 +56,9 @@ const infoModalSummary = computed(() =>
 )
 const activeDetailSource = computed(() =>
   typeof route.query.source === 'string' && route.query.source ? route.query.source : 'local',
+)
+const activeDetailVersion = computed(() =>
+  typeof route.query.version === 'string' && route.query.version ? route.query.version : '',
 )
 const localTabSummary = computed(() =>
   search.value ? `匹配 ${localSkills.value.length} 个结果` : `当前共 ${localSkills.value.length} 个 Skill`,
@@ -138,13 +141,15 @@ async function loadMoreRemoteSkills() {
   await loadSkills(search.value, { page: remotePage.value + 1, appendRemote: true })
 }
 
-async function loadSkillDetail(source, slug) {
+async function loadSkillDetail(source, slug, version = '') {
   const requestId = detailRequestId + 1
   detailRequestId = requestId
   detailLoading.value = true
   detailError.value = ''
   try {
-    const payload = await fetchSkill(source, slug)
+    const payload = source === 'local' && version
+      ? await fetchLocalSkillVersion(slug, version)
+      : await fetchSkill(source, slug)
     if (detailRequestId !== requestId) {
       return
     }
@@ -180,14 +185,21 @@ function handleLibraryTabSelect(tabKey) {
 function openSkillDetail(skill) {
   router.replace({
     name: 'home',
-    query: buildHomeQuery({ skill: skill.slug, source: skill.source }),
+    query: buildHomeQuery({ skill: skill.slug, source: skill.source, version: null }),
   })
 }
 
 function closeSkillDetail() {
   router.replace({
     name: 'home',
-    query: buildHomeQuery({ skill: null, source: null }),
+    query: buildHomeQuery({ skill: null, source: null, version: null }),
+  })
+}
+
+function handleDetailVersionSelect(version) {
+  router.replace({
+    name: 'home',
+    query: buildHomeQuery({ version }),
   })
 }
 
@@ -246,10 +258,14 @@ watch(search, (value) => {
 })
 
 watch(
-  [() => route.query.skill, () => route.query.source],
-  ([slug, source]) => {
+  [() => route.query.skill, () => route.query.source, () => route.query.version],
+  ([slug, source, version]) => {
     if (typeof slug === 'string' && slug) {
-      loadSkillDetail(typeof source === 'string' && source ? source : 'local', slug)
+      loadSkillDetail(
+        typeof source === 'string' && source ? source : 'local',
+        slug,
+        typeof version === 'string' ? version : '',
+      )
       return
     }
     detailRequestId += 1
@@ -372,6 +388,8 @@ onBeforeUnmount(() => {
       :error="detailError"
       :skill="selectedSkill"
       :source="activeDetailSource"
+      :selected-version="activeDetailVersion"
+      @version-select="handleDetailVersionSelect"
       @close="closeSkillDetail"
     />
     <InfoModal

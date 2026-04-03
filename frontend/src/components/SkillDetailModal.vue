@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, watch } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 
 import CommandSnippet from './CommandSnippet.vue'
 
@@ -24,9 +24,17 @@ const props = defineProps({
     type: String,
     default: 'local',
   },
+  selectedVersion: {
+    type: String,
+    default: '',
+  },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'version-select'])
+
+const effectiveVersion = computed(() => props.selectedVersion || props.skill?.version || '')
+const historyVersions = computed(() => props.skill?.history_versions || [])
+const canSelectHistory = computed(() => props.source === 'local' && historyVersions.value.length > 0)
 
 function closeModal() {
   emit('close')
@@ -42,6 +50,10 @@ function handleKeydown(event) {
   if (event.key === 'Escape') {
     closeModal()
   }
+}
+
+function handleVersionChange(event) {
+  emit('version-select', event.target.value)
 }
 
 watch(
@@ -87,6 +99,18 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="detail-modal__meta">
+              <div v-if="source === 'local'" class="detail-meta__item">
+                <span>版本号</span>
+                <code>{{ skill.version || '未设置' }}</code>
+              </div>
+              <div v-if="canSelectHistory" class="detail-meta__item">
+                <span>历史版本</span>
+                <select class="text-input detail-meta__select" :value="effectiveVersion" @change="handleVersionChange">
+                  <option v-for="version in historyVersions" :key="version" :value="version">
+                    {{ version }}
+                  </option>
+                </select>
+              </div>
               <CommandSnippet label="Skill 安装" :command="skill.install_command" compact />
               <div v-if="skill.source_repository || skill.detail_url" class="detail-meta__item">
                 <span>来源信息</span>

@@ -3,12 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
-import { clearToken, fetchAdminSkills, logout } from '../../services/api'
+import { clearToken, deleteSkill, fetchAdminSkills, logout } from '../../services/api'
 
 const router = useRouter()
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
+const deletingName = ref('')
 const skills = ref([])
 let searchTimer = null
 
@@ -34,6 +35,19 @@ const emptyStateText = computed(() =>
     : '当前还没有 Skill。',
 )
 
+function formatDate(value) {
+  if (!value) {
+    return '-'
+  }
+  return new Date(value).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 async function loadSkills(keyword = '') {
   loading.value = true
   error.value = ''
@@ -56,6 +70,23 @@ async function handleLogout() {
   } finally {
     clearToken()
     router.push('/admin/login')
+  }
+}
+
+async function handleDelete(skill) {
+  if (!window.confirm(`确认删除 Skill「${skill.name}」吗？删除后前台与后台列表都将隐藏该 Skill。`)) {
+    return
+  }
+
+  deletingName.value = skill.name
+  error.value = ''
+  try {
+    await deleteSkill(skill.name)
+    await loadSkills(search.value.trim())
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    deletingName.value = ''
   }
 }
 
@@ -102,7 +133,7 @@ function clearSearch() {
         <div class="admin-search__copy">
           <p class="eyebrow">快速筛选</p>
           <h2>搜索 Skill</h2>
-          <p class="search-panel__lead">搜索区改为稳定的后台工具栏，避免输入框样式和布局在不同宽度下错位。</p>
+          <p class="search-panel__lead">后台列表改为表格展示，标题可点击进入只读详情页。</p>
         </div>
         <label class="search-field search-field--admin" for="admin-skill-search">
           <div class="search-field__meta">
@@ -141,20 +172,47 @@ function clearSearch() {
       <section v-else-if="loading" class="feedback">正在加载后台数据...</section>
       <section v-else-if="!skills.length" class="feedback">{{ emptyStateText }}</section>
 
-      <section v-else class="admin-list">
-        <article v-for="skill in skills" :key="skill.name" class="admin-list__item">
-          <div>
-            <h2>{{ skill.name }}</h2>
-            <p v-if="skill.contributor" class="admin-list__meta">贡献者：{{ skill.contributor }}</p>
-            <div class="admin-list__description" v-html="skill.description_html"></div>
-          </div>
-          <div class="admin-list__actions">
-            <code>{{ skill.install_command }}</code>
-            <router-link class="button button--ghost" :to="`/admin/skills/${skill.name}/edit`">
-              编辑 / 升级
-            </router-link>
-          </div>
-        </article>
+      <section v-else class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">标题</th>
+              <th scope="col">当前版本</th>
+              <th scope="col">贡献者</th>
+              <th scope="col">更新时间</th>
+              <th scope="col">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="skill in skills" :key="skill.name">
+              <td>
+                <router-link class="admin-table__title" :to="`/admin/skills/${skill.name}`">
+                  {{ skill.name }}
+                </router-link>
+              </td>
+              <td>
+                <span class="version-chip">{{ skill.current_version }}</span>
+              </td>
+              <td>{{ skill.contributor || '-' }}</td>
+              <td>{{ formatDate(skill.updated_at) }}</td>
+              <td>
+                <div class="admin-table__actions">
+                  <router-link class="button button--ghost" :to="`/admin/skills/${skill.name}/edit`">
+                    编辑
+                  </router-link>
+                  <button
+                    class="button button--danger"
+                    type="button"
+                    :disabled="deletingName === skill.name"
+                    @click="handleDelete(skill)"
+                  >
+                    {{ deletingName === skill.name ? '删除中...' : '删除' }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
     </main>
   </div>

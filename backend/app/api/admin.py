@@ -10,7 +10,9 @@ from app.services import nexus as nexus_service
 from app.services.skill_service import (
     create_skill,
     get_skill_by_name,
+    get_skill_versions,
     search_skills,
+    soft_delete_skill,
     to_admin_skill_detail,
     to_skill_summary,
     update_skill,
@@ -45,7 +47,8 @@ def get_admin_skill(name: str, session: DbSession, _: str = Depends(get_current_
     skill = get_skill_by_name(session, name)
     if skill is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
-    return AdminSkillDetail.model_validate(to_admin_skill_detail(skill))
+    versions = get_skill_versions(session, skill)
+    return AdminSkillDetail.model_validate(to_admin_skill_detail(skill, versions))
 
 
 @router.post("/skills", response_model=AdminSkillDetail, status_code=status.HTTP_201_CREATED)
@@ -69,7 +72,8 @@ async def create_admin_skill(
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Skill 已存在") from exc
-    return AdminSkillDetail.model_validate(to_admin_skill_detail(skill))
+    versions = get_skill_versions(session, skill)
+    return AdminSkillDetail.model_validate(to_admin_skill_detail(skill, versions))
 
 
 @router.put("/skills/{name}", response_model=AdminSkillDetail)
@@ -92,8 +96,20 @@ async def update_admin_skill(
         zip_content = await validate_zip_file(zip_file)
         package_url = nexus_service.upload_skill_zip(validated_name, zip_content)
 
-    next_contributor = None
     if contributor_submitted:
         next_contributor = contributor if contributor is not None else ""
-    skill = update_skill(session, skill, description_markdown, package_url, next_contributor)
-    return AdminSkillDetail.model_validate(to_admin_skill_detail(skill))
+        skill = update_skill(session, skill, description_markdown, package_url, next_contributor)
+    else:
+        skill = update_skill(session, skill, description_markdown, package_url)
+    versions = get_skill_versions(session, skill)
+    return AdminSkillDetail.model_validate(to_admin_skill_detail(skill, versions))
+
+
+@router.delete("/skills/{name}", response_model=MessageResponse)
+def delete_admin_skill(name: str, session: DbSession, _: str = Depends(get_current_admin)):
+    validated_name = validate_skill_name(name)
+    skill = get_skill_by_name(session, validated_name)
+    if skill is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
+    soft_delete_skill(session, skill)
+    return MessageResponse(message="Skill 已删除")

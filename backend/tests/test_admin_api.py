@@ -57,6 +57,22 @@ def auth_headers(client: TestClient) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def create_local_skill(client: TestClient, monkeypatch, name: str = "demo-skill"):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+
+    response = client.post(
+        "/api/admin/skills",
+        headers=auth_headers(client),
+        files={"zip_file": (f"{name}.zip", make_zip("# skill"), "application/zip")},
+        data={"name": name, "description_markdown": "local detail"},
+    )
+    assert response.status_code == 201
+    return response
+
+
 def test_login_success(client: TestClient):
     response = client.post("/api/admin/login", json={"username": "admin", "password": "admin"})
     assert response.status_code == 200
@@ -90,24 +106,15 @@ def test_upload_requires_skill_md(client: TestClient, monkeypatch):
 
 
 def test_create_and_search_skill(client: TestClient, monkeypatch):
-    def fake_upload(skill_name: str, content: bytes) -> str:
-        return nexus_service.build_package_url(skill_name)
-
     async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
         return [], False
 
-    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
     monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
 
-    response = client.post(
-        "/api/admin/skills",
-        headers=auth_headers(client),
-        files={"zip_file": ("plm-assistant.zip", make_zip("# skill"), "application/zip")},
-        data={"name": "plm-assistant", "description_markdown": "PLM 工具 Skill"},
-    )
-    assert response.status_code == 201
+    response = create_local_skill(client, monkeypatch, name="plm-assistant")
+    assert response.json()["current_version"] == "1.0.0"
 
-    search_response = client.get("/api/skills", params={"q": "PLM"})
+    search_response = client.get("/api/skills", params={"q": "local"})
     assert search_response.status_code == 200
     payload = search_response.json()
     assert payload["local_items"][0]["name"] == "plm-assistant"
@@ -132,25 +139,16 @@ def test_create_skill_stores_optional_contributor(client: TestClient, monkeypatc
     )
     assert response.status_code == 201
     assert response.json()["contributor"] == "平台研发组"
+    assert response.json()["current_version"] == "1.0.0"
 
     list_response = client.get("/api/admin/skills", headers=auth_headers(client))
     assert list_response.status_code == 200
     assert list_response.json()[0]["contributor"] == "平台研发组"
 
 
-def test_upgrade_skill(client: TestClient, monkeypatch):
-    def fake_upload(skill_name: str, content: bytes) -> str:
-        return nexus_service.build_package_url(skill_name)
-
-    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
-
-    create_response = client.post(
-        "/api/admin/skills",
-        headers=auth_headers(client),
-        files={"zip_file": ("demo-upgrade.zip", make_zip("# first"), "application/zip")},
-        data={"name": "demo-upgrade", "description_markdown": "old", "contributor": "旧贡献者"},
-    )
-    assert create_response.status_code == 201
+def test_upgrade_skill_creates_new_version_history(client: TestClient, monkeypatch):
+    create_response = create_local_skill(client, monkeypatch, name="demo-upgrade")
+    assert create_response.json()["current_version"] == "1.0.0"
 
     update_response = client.put(
         "/api/admin/skills/demo-upgrade",
@@ -159,12 +157,73 @@ def test_upgrade_skill(client: TestClient, monkeypatch):
         data={"description_markdown": "new description", "contributor": "", "contributor_submitted": "true"},
     )
     assert update_response.status_code == 200
-    assert update_response.json()["description_markdown"] == "new description"
-    assert update_response.json()["contributor"] is None
-    assert "package_url" not in update_response.json()
+    payload = update_response.json()
+    assert payload["description_markdown"] == "new description"
+    assert payload["contributor"] is None
+    assert payload["current_version"] == "1.0.1"
+    assert [item["version"] for item in payload["version_history"]] == ["1.0.1", "1.0.0"]
+    assert "package_url" not in payload
 
 
-def test_schema_compatibility_adds_contributor_column_for_existing_skills_table():
+def test_public_local_detail_supports_history_query(client: TestClient, monkeypatch):
+    create_local_skill(client, monkeypatch, name="history-skill")
+
+    update_response = client.put(
+        "/api/admin/skills/history-skill",
+        headers=auth_headers(client),
+        data={"description_markdown": "second version"},
+    )
+    assert update_response.status_code == 200
+
+    current_detail = client.get("/api/skills/local/history-skill")
+    assert current_detail.status_code == 200
+    current_payload = current_detail.json()
+    assert current_payload["version"] == "1.0.1"
+    assert current_payload["history_versions"] == ["1.0.1", "1.0.0"]
+
+    old_detail = client.get("/api/skills/local/history-skill/versions/1.0.0")
+    assert old_detail.status_code == 200
+    old_payload = old_detail.json()
+    assert old_payload["version"] == "1.0.0"
+    assert "local detail" in old_payload["description_html"]
+
+
+def test_delete_skill_hides_admin_and_public_views(client: TestClient, monkeypatch):
+    create_local_skill(client, monkeypatch, name="remove-me")
+
+    delete_response = client.delete("/api/admin/skills/remove-me", headers=auth_headers(client))
+    assert delete_response.status_code == 200
+
+    admin_list = client.get("/api/admin/skills", headers=auth_headers(client))
+    assert admin_list.status_code == 200
+    assert admin_list.json() == []
+
+    public_list = client.get("/api/skills")
+    assert public_list.status_code == 200
+    assert public_list.json()["local_items"] == []
+
+    assert client.get("/api/admin/skills/remove-me", headers=auth_headers(client)).status_code == 404
+    assert client.get("/api/skills/local/remove-me").status_code == 404
+
+
+def test_version_ceiling_returns_422(client: TestClient, monkeypatch):
+    create_local_skill(client, monkeypatch, name="ceiling-skill")
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE skills SET current_version = '9.9.9' WHERE name = 'ceiling-skill'")
+        )
+
+    response = client.put(
+        "/api/admin/skills/ceiling-skill",
+        headers=auth_headers(client),
+        data={"description_markdown": "blocked"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Skill 版本已达到 9.9.9，无法继续升级"
+
+
+def test_schema_compatibility_adds_versioning_columns_and_history_table():
     Base.metadata.drop_all(bind=engine)
     with engine.begin() as connection:
         connection.execute(
@@ -182,17 +241,45 @@ def test_schema_compatibility_adds_contributor_column_for_existing_skills_table(
                 """
             )
         )
+        connection.execute(
+            text(
+                """
+                INSERT INTO skills (
+                    id,
+                    name,
+                    description_markdown,
+                    description_html,
+                    package_url
+                ) VALUES (
+                    1,
+                    'legacy-skill',
+                    'legacy markdown',
+                    '<p>legacy markdown</p>',
+                    'http://example.invalid/legacy-skill.zip'
+                )
+                """
+            )
+        )
 
     ensure_schema_compatibility(engine)
 
     columns = {column["name"] for column in inspect(engine).get_columns("skills")}
-    assert "contributor" in columns
+    assert {"contributor", "current_version", "deleted_at"}.issubset(columns)
+    assert "skill_versions" in inspect(engine).get_table_names()
+
+    with engine.begin() as connection:
+        skill_row = connection.execute(
+            text("SELECT current_version FROM skills WHERE name = 'legacy-skill'")
+        ).mappings().one()
+        version_row = connection.execute(
+            text("SELECT version FROM skill_versions WHERE skill_id = 1")
+        ).mappings().one()
+
+    assert skill_row["current_version"] == "1.0.0"
+    assert version_row["version"] == "1.0.0"
 
 
 def test_public_skills_groups_local_and_remote_results(client: TestClient, monkeypatch):
-    def fake_upload(skill_name: str, content: bytes) -> str:
-        return nexus_service.build_package_url(skill_name)
-
     async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
         assert page == 1
         assert page_size == 12
@@ -207,18 +294,11 @@ def test_public_skills_groups_local_and_remote_results(client: TestClient, monke
             )
         ], True
 
-    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
     monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
 
-    create_response = client.post(
-        "/api/admin/skills",
-        headers=auth_headers(client),
-        files={"zip_file": ("plm-assistant.zip", make_zip("# skill"), "application/zip")},
-        data={"name": "plm-assistant", "description_markdown": "PLM 工具 Skill"},
-    )
-    assert create_response.status_code == 201
+    create_local_skill(client, monkeypatch, name="plm-assistant")
 
-    response = client.get("/api/skills", params={"q": "plm"})
+    response = client.get("/api/skills", params={"q": "local"})
     assert response.status_code == 200
 
     payload = response.json()
@@ -251,25 +331,17 @@ def test_public_remote_detail_uses_source_and_slug(client: TestClient, monkeypat
     assert payload["source"] == "skills_sh"
     assert payload["source_repository"] == "vercel-labs/agent-skills"
     assert payload["install_command"] == 'ssc-skills add "https://github.com/vercel-labs/agent-skills" --as --skill "frontend-design"'
+    assert payload["version"] is None
+    assert payload["history_versions"] == []
 
 
 def test_public_remote_failure_does_not_break_local_results(client: TestClient, monkeypatch):
-    def fake_upload(skill_name: str, content: bytes) -> str:
-        return nexus_service.build_package_url(skill_name)
-
     async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
         raise RuntimeError("skills.sh unavailable")
 
-    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
     monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
 
-    create_response = client.post(
-        "/api/admin/skills",
-        headers=auth_headers(client),
-        files={"zip_file": ("demo.zip", make_zip("# skill"), "application/zip")},
-        data={"name": "demo-skill", "description_markdown": "local detail"},
-    )
-    assert create_response.status_code == 201
+    create_local_skill(client, monkeypatch, name="demo-skill")
 
     response = client.get("/api/skills")
     assert response.status_code == 200

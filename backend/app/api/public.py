@@ -7,9 +7,12 @@ from app.schemas.skill import PublicSkillDetail, PublicSkillSummary, SkillListRe
 from app.services.skill_service import (
     PUBLIC_SOURCE_LOCAL,
     get_skill_by_name,
+    get_skill_version,
+    get_skill_versions,
     search_skills,
     to_public_skill_detail as to_local_public_skill_detail,
     to_public_skill_summary as to_local_public_skill_summary,
+    to_public_skill_version_detail,
 )
 from app.services.skills_registry import (
     PUBLIC_SOURCE_SKILLS_SH,
@@ -59,13 +62,28 @@ async def list_skills(
     )
 
 
+@router.get("/skills/local/{slug}/versions/{version}", response_model=PublicSkillDetail)
+async def get_local_skill_version(slug: str, version: str, session: DbSession):
+    skill = get_skill_by_name(session, slug)
+    if skill is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
+
+    skill_version = get_skill_version(session, skill, version)
+    if skill_version is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 版本不存在")
+
+    versions = get_skill_versions(session, skill)
+    return PublicSkillDetail.model_validate(to_public_skill_version_detail(skill, skill_version, versions))
+
+
 @router.get("/skills/{source}/{slug:path}", response_model=PublicSkillDetail)
 async def get_skill(source: str, slug: str, session: DbSession):
     if source == PUBLIC_SOURCE_LOCAL:
         skill = get_skill_by_name(session, slug)
         if skill is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
-        return PublicSkillDetail.model_validate(to_local_public_skill_detail(skill))
+        versions = get_skill_versions(session, skill)
+        return PublicSkillDetail.model_validate(to_local_public_skill_detail(skill, versions))
 
     if source == PUBLIC_SOURCE_SKILLS_SH:
         try:

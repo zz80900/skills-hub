@@ -1,19 +1,25 @@
 import io
 import re
 import zipfile
+from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models.skill import Skill
+from app.models.skill import Skill, SkillVersion
 from app.services.markdown import render_markdown
 from app.services.nexus import build_package_url
 
 
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SKILL_VERSION_PATTERN = re.compile(r"^(?P<major>[0-9])\.(?P<minor>[0-9])\.(?P<patch>[0-9])$")
+INITIAL_SKILL_VERSION = "1.0.0"
+MAX_SKILL_VERSION = "9.9.9"
 PUBLIC_SOURCE_LOCAL = "local"
 PUBLIC_SOURCE_LOCAL_LABEL = "本地库"
+UNSET = object()
 
 
 def normalize_optional_text(value: str | None) -> str | None:
@@ -77,8 +83,35 @@ def get_install_command(skill_name: str) -> str:
     return f"ssc-skills install {skill_name}"
 
 
+def get_next_version(current_version: str) -> str:
+    match = SKILL_VERSION_PATTERN.fullmatch((current_version or "").strip())
+    if match is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Skill 版本数据无效")
+
+    major = int(match.group("major"))
+    minor = int(match.group("minor"))
+    patch = int(match.group("patch"))
+    if (major, minor, patch) >= (9, 9, 9):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Skill 版本已达到 9.9.9，无法继续升级",
+        )
+
+    if patch < 9:
+        patch += 1
+    else:
+        patch = 0
+        if minor < 9:
+            minor += 1
+        else:
+            minor = 0
+            major += 1
+
+    return f"{major}.{minor}.{patch}"
+
+
 def search_skills(session: Session, query: str | None = None) -> list[Skill]:
-    statement = select(Skill).order_by(Skill.updated_at.desc(), Skill.id.desc())
+    statement = select(Skill).where(Skill.deleted_at.is_(None)).order_by(Skill.updated_at.desc(), Skill.id.desc())
     if query:
         keyword = f"%{query.strip()}%"
         statement = statement.where(
@@ -90,8 +123,28 @@ def search_skills(session: Session, query: str | None = None) -> list[Skill]:
     return list(session.scalars(statement))
 
 
-def get_skill_by_name(session: Session, name: str) -> Skill | None:
+def get_skill_by_name(session: Session, name: str, include_deleted: bool = False) -> Skill | None:
     statement = select(Skill).where(Skill.name == name)
+    if not include_deleted:
+        statement = statement.where(Skill.deleted_at.is_(None))
+    return session.scalar(statement)
+
+
+def get_skill_versions(session: Session, skill: Skill) -> list[SkillVersion]:
+    statement = (
+        select(SkillVersion)
+        .where(SkillVersion.skill_id == skill.id)
+        .order_by(SkillVersion.id.desc())
+    )
+    return list(session.scalars(statement))
+
+
+def get_skill_version(session: Session, skill: Skill, version: str) -> SkillVersion | None:
+    statement = (
+        select(SkillVersion)
+        .where(SkillVersion.skill_id == skill.id, SkillVersion.version == version)
+        .order_by(SkillVersion.id.desc())
+    )
     return session.scalar(statement)
 
 
@@ -102,14 +155,28 @@ def create_skill(
     package_url: str,
     contributor: str | None = None,
 ) -> Skill:
+    normalized_contributor = normalize_optional_text(contributor)
+    description_html = render_markdown(description_markdown)
     skill = Skill(
         name=name,
         description_markdown=description_markdown,
-        description_html=render_markdown(description_markdown),
-        contributor=normalize_optional_text(contributor),
+        description_html=description_html,
+        contributor=normalized_contributor,
         package_url=package_url,
+        current_version=INITIAL_SKILL_VERSION,
     )
     session.add(skill)
+    session.flush()
+    session.add(
+        SkillVersion(
+            skill_id=skill.id,
+            version=INITIAL_SKILL_VERSION,
+            description_markdown=description_markdown,
+            description_html=description_html,
+            contributor=normalized_contributor,
+            package_url=package_url,
+        )
+    )
     session.commit()
     session.refresh(skill)
     return skill
@@ -118,26 +185,48 @@ def create_skill(
 def update_skill(
     session: Session,
     skill: Skill,
-    description_markdown: str | None,
+    description_markdown: str,
     package_url: str | None,
-    contributor: str | None = None,
+    contributor: str | object = UNSET,
 ) -> Skill:
-    if description_markdown is not None:
-        skill.description_markdown = description_markdown
-        skill.description_html = render_markdown(description_markdown)
-    if package_url is not None:
-        skill.package_url = package_url
-    if contributor is not None:
-        skill.contributor = normalize_optional_text(contributor)
+    next_version = get_next_version(skill.current_version)
+    next_contributor = skill.contributor if contributor is UNSET else normalize_optional_text(contributor)
+    next_package_url = package_url or skill.package_url
+    description_html = render_markdown(description_markdown)
+
+    skill.description_markdown = description_markdown
+    skill.description_html = description_html
+    skill.contributor = next_contributor
+    skill.package_url = next_package_url
+    skill.current_version = next_version
+
     session.add(skill)
+    session.flush()
+    session.add(
+        SkillVersion(
+            skill_id=skill.id,
+            version=next_version,
+            description_markdown=description_markdown,
+            description_html=description_html,
+            contributor=next_contributor,
+            package_url=next_package_url,
+        )
+    )
     session.commit()
     session.refresh(skill)
     return skill
 
 
-def to_skill_summary(skill: Skill) -> dict:
+def soft_delete_skill(session: Session, skill: Skill) -> None:
+    skill.deleted_at = datetime.now(timezone.utc)
+    session.add(skill)
+    session.commit()
+
+
+def to_skill_summary(skill: Skill) -> dict[str, Any]:
     return {
         "name": skill.name,
+        "current_version": skill.current_version,
         "contributor": skill.contributor,
         "description_html": skill.description_html,
         "install_command": get_install_command(skill.name),
@@ -146,11 +235,23 @@ def to_skill_summary(skill: Skill) -> dict:
     }
 
 
-def to_skill_detail(skill: Skill) -> dict:
-    return to_skill_summary(skill)
+def to_admin_version_summary(version: SkillVersion) -> dict[str, Any]:
+    return {
+        "version": version.version,
+        "contributor": version.contributor,
+        "created_at": version.created_at,
+    }
 
 
-def to_public_skill_summary(skill: Skill) -> dict:
+def to_admin_skill_detail(skill: Skill, versions: list[SkillVersion]) -> dict[str, Any]:
+    return {
+        **to_skill_summary(skill),
+        "description_markdown": skill.description_markdown,
+        "version_history": [to_admin_version_summary(version) for version in versions],
+    }
+
+
+def to_public_skill_summary(skill: Skill) -> dict[str, Any]:
     return {
         "source": PUBLIC_SOURCE_LOCAL,
         "source_label": PUBLIC_SOURCE_LOCAL_LABEL,
@@ -162,23 +263,37 @@ def to_public_skill_summary(skill: Skill) -> dict:
     }
 
 
-def to_public_skill_detail(skill: Skill) -> dict:
+def _history_versions(versions: list[SkillVersion]) -> list[str]:
+    return [version.version for version in versions]
+
+
+def to_public_skill_detail(skill: Skill, versions: list[SkillVersion]) -> dict[str, Any]:
     return {
         **to_public_skill_summary(skill),
+        "version": skill.current_version,
+        "history_versions": _history_versions(versions),
         "detail_url": None,
         "source_repository": None,
     }
 
 
-def to_admin_skill_detail(skill: Skill) -> dict:
+def to_public_skill_version_detail(
+    skill: Skill,
+    version: SkillVersion,
+    versions: list[SkillVersion],
+) -> dict[str, Any]:
     return {
+        "source": PUBLIC_SOURCE_LOCAL,
+        "source_label": PUBLIC_SOURCE_LOCAL_LABEL,
+        "slug": skill.name,
         "name": skill.name,
-        "contributor": skill.contributor,
-        "description_markdown": skill.description_markdown,
-        "description_html": skill.description_html,
+        "description_html": version.description_html,
         "install_command": get_install_command(skill.name),
-        "created_at": skill.created_at,
-        "updated_at": skill.updated_at,
+        "installs": None,
+        "version": version.version,
+        "history_versions": _history_versions(versions),
+        "detail_url": None,
+        "source_repository": None,
     }
 
 

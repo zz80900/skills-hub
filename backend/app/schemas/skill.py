@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PublicSkillSummary(BaseModel):
@@ -37,12 +37,23 @@ class PublicSkillDetail(BaseModel):
     installs: int | None = None
     detail_url: str | None = None
     source_repository: str | None = None
+    version: str | None = None
+    history_versions: list[str] = Field(default_factory=list)
+
+
+class AdminSkillVersionSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    version: str
+    contributor: str | None = None
+    created_at: datetime
 
 
 class AdminSkillSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str
+    current_version: str
     contributor: str | None = None
     description_html: str
     install_command: str
@@ -54,3 +65,4 @@ class AdminSkillDetail(AdminSkillSummary):
     model_config = ConfigDict(from_attributes=True)
 
     description_markdown: str
+    version_history: list[AdminSkillVersionSummary]
