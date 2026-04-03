@@ -13,8 +13,10 @@ const emit = defineEmits(['select'])
   <button type="button" class="skill-card skill-card--button" @click="emit('select', skill)">
     <div class="skill-card__top">
       <div class="skill-card__title">
-        <span class="skill-card__meta">{{ skill.source_label }}</span>
-        <h3>{{ skill.name }}</h3>
+        <h3 class="skill-card__name">
+          <span class="skill-card__meta">{{ skill.source_label }}</span>
+          <span class="skill-card__name-text">{{ skill.name }}</span>
+        </h3>
       </div>
       <span class="skill-card__badge">
         {{ skill.installs ? `${skill.installs} installs` : '查看详情' }}

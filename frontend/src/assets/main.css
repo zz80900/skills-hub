@@ -569,24 +569,36 @@ pre {
 }
 
 .skill-card__title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .skill-card__top h3 {
   margin: 0;
-  flex: 1 1 180px;
   min-width: 0;
   font-size: 1.1rem;
   line-height: 1.35;
+  font-weight: 700;
+}
+
+.skill-card__name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px 10px;
+}
+
+.skill-card__name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .skill-card__meta {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   width: fit-content;
   padding: 4px 10px;
   border-radius: 999px;
