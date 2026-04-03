@@ -281,8 +281,8 @@ pre {
 .search-field--inline {
   min-width: 0;
   padding: 0;
-  gap: 14px;
-  grid-template-columns: auto auto minmax(360px, 1.25fr);
+  gap: 24px;
+  grid-template-columns: minmax(280px, 360px) minmax(560px, 1.9fr);
   align-items: center;
   background: transparent;
   border: none;
@@ -291,13 +291,19 @@ pre {
 .search-field__label--inline {
   font-weight: 700;
   color: var(--text);
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .search-field__hint {
   color: var(--text-soft);
   font-size: 0.9rem;
   white-space: nowrap;
+}
+
+.search-field--inline .text-input {
+  min-height: 66px;
+  padding-left: 22px;
+  padding-right: 22px;
 }
 
 .search-field--admin {
