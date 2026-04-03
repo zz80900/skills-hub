@@ -21,6 +21,6 @@ const emit = defineEmits(['select'])
       </span>
     </div>
     <div class="skill-card__description" v-html="skill.description_html"></div>
-    <span class="skill-card__hint">点击条目后以模态框查看描述与安装命令</span>
+    <span class="skill-card__hint">点击查看描述与安装命令</span>
   </button>
 </template>
