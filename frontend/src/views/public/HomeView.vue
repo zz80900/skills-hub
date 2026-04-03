@@ -289,9 +289,6 @@ onBeforeUnmount(() => {
           <span class="search-field__label search-field__label--inline">
             搜索 Skill，统一检索本地库与 skills.sh。
           </span>
-          <span class="search-field__hint">
-            {{ search ? `当前关键词：${search}` : '输入后自动刷新当前 Tab 内容' }}
-          </span>
           <input
             id="skill-search"
             v-model.trim="search"
