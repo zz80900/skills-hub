@@ -84,7 +84,8 @@ watch(
             <h1>{{ skill.name }}</h1>
             <p class="detail-modal__summary">当前版本 {{ skill.current_version }}</p>
           </div>
-          <div class="admin-toolbar__actions">
+          <div class="admin-toolbar__actions admin-detail__actions">
+            <router-link class="button button--ghost" to="/admin">返回列表</router-link>
             <router-link class="button button--ghost" :to="`/admin/skills/${skill.name}/edit`">编辑</router-link>
             <button class="button button--danger" type="button" :disabled="deleting" @click="handleDelete">
               {{ deleting ? '删除中...' : '删除' }}

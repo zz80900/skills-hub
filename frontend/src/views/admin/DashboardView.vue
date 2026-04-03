@@ -3,13 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
-import { clearToken, deleteSkill, fetchAdminSkills, logout } from '../../services/api'
+import { clearToken, fetchAdminSkills, logout } from '../../services/api'
 
 const router = useRouter()
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
-const deletingName = ref('')
 const skills = ref([])
 let searchTimer = null
 
@@ -70,23 +69,6 @@ async function handleLogout() {
   } finally {
     clearToken()
     router.push('/admin/login')
-  }
-}
-
-async function handleDelete(skill) {
-  if (!window.confirm(`确认删除 Skill「${skill.name}」吗？删除后前台与后台列表都将隐藏该 Skill。`)) {
-    return
-  }
-
-  deletingName.value = skill.name
-  error.value = ''
-  try {
-    await deleteSkill(skill.name)
-    await loadSkills(search.value.trim())
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    deletingName.value = ''
   }
 }
 
@@ -180,7 +162,7 @@ function clearSearch() {
               <th scope="col">当前版本</th>
               <th scope="col">贡献者</th>
               <th scope="col">更新时间</th>
-              <th scope="col">操作</th>
+              <!-- <th scope="col">操作</th> -->
             </tr>
           </thead>
           <tbody>
@@ -195,7 +177,7 @@ function clearSearch() {
               </td>
               <td>{{ skill.contributor || '-' }}</td>
               <td>{{ formatDate(skill.updated_at) }}</td>
-              <td>
+              <!-- <td>
                 <div class="admin-table__actions">
                   <router-link class="button button--ghost" :to="`/admin/skills/${skill.name}/edit`">
                     编辑
@@ -209,7 +191,7 @@ function clearSearch() {
                     {{ deletingName === skill.name ? '删除中...' : '删除' }}
                   </button>
                 </div>
-              </td>
+              </td> -->
             </tr>
           </tbody>
         </table>
