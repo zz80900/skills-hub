@@ -26,6 +26,7 @@ const remotePage = ref(1)
 const remotePageSize = ref(12)
 const remoteHasMore = ref(false)
 const remoteSentinel = ref(null)
+const showBackToTop = ref(false)
 let searchTimer = null
 let detailRequestId = 0
 let remoteObserver = null
@@ -197,6 +198,14 @@ function closeInfoModal() {
   })
 }
 
+function handleWindowScroll() {
+  showBackToTop.value = window.scrollY > 480
+}
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 function resetRemoteObserver() {
   if (remoteObserver) {
     remoteObserver.disconnect()
@@ -260,11 +269,14 @@ watch(
 
 onMounted(() => {
   loadSkills('', { page: 1 })
+  handleWindowScroll()
+  window.addEventListener('scroll', handleWindowScroll, { passive: true })
 })
 
 onBeforeUnmount(() => {
   window.clearTimeout(searchTimer)
   resetRemoteObserver()
+  window.removeEventListener('scroll', handleWindowScroll)
 })
 </script>
 
@@ -384,5 +396,21 @@ onBeforeUnmount(() => {
         compact
       />
     </InfoModal>
+    <transition name="back-to-top-fade">
+      <button
+        v-if="showBackToTop"
+        class="back-to-top"
+        type="button"
+        aria-label="返回顶部"
+        @click="scrollToTop"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 5.5a.75.75 0 0 1 .53.22l5.25 5.25a.75.75 0 1 1-1.06 1.06l-3.97-3.97V18a.75.75 0 0 1-1.5 0V8.06l-3.97 3.97a.75.75 0 0 1-1.06-1.06l5.25-5.25A.75.75 0 0 1 12 5.5Z"
+            fill="currentColor"
+          />
+        </svg>
+      </button>
+    </transition>
   </div>
 </template>
