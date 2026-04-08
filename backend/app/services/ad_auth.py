@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -84,7 +85,7 @@ class ActiveDirectoryAuthenticator:
     def _run_kinit(self, principal: str, password: str) -> dict[str, str]:
         command = build_command(self._settings.ad_kinit_command)
         executable = resolve_executable(command[0])
-        tempdir = tempfile.mkdtemp(prefix="ssc-skills-krb5-")
+        tempdir = str(create_kerberos_temp_dir())
         krb5_conf_path = self._settings.ad_kdc and write_krb5_conf(
             Path(tempdir),
             self._settings.ad_realm,
@@ -357,6 +358,17 @@ def dedupe_strings(values: list[str]) -> list[str]:
         seen.add(lookup_key)
         result.append(normalized)
     return result
+
+
+def create_kerberos_temp_dir(parent_dir: Path | None = None) -> Path:
+    root_dir = parent_dir or Path(tempfile.gettempdir())
+    while True:
+        path = root_dir / f"ssc-skills-krb5-{secrets.token_hex(8)}"
+        try:
+            path.mkdir(parents=True, exist_ok=False)
+            return path
+        except FileExistsError:  # pragma: no cover - collision is unlikely
+            continue
 
 
 def write_krb5_conf(directory: Path, realm: str, kdc: str) -> Path:

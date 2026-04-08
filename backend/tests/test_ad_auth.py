@@ -5,7 +5,7 @@ import sys
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.services.ad_auth import ActiveDirectoryUnavailableError, parse_ldap_server_url
+from app.services.ad_auth import ActiveDirectoryUnavailableError, create_kerberos_temp_dir, parse_ldap_server_url
 
 
 def test_parse_ldap_server_url_accepts_ldap_scheme():
@@ -27,3 +27,17 @@ def test_parse_ldap_server_url_rejects_invalid_scheme():
         assert str(exc) == "invalid ldap url: http://10.18.8.16:389"
     else:
         raise AssertionError("expected ActiveDirectoryUnavailableError")
+
+
+def test_create_kerberos_temp_dir_is_writable():
+    parent_dir = BACKEND_ROOT / "tests" / "local-test-tmp"
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    directory = create_kerberos_temp_dir(parent_dir)
+    try:
+        file_path = directory / "krb5.conf"
+        file_path.write_text("test", encoding="utf-8")
+        assert file_path.read_text(encoding="utf-8") == "test"
+    finally:
+        for child in directory.iterdir():
+            child.unlink()
+        directory.rmdir()
