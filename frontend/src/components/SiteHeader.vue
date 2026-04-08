@@ -1,31 +1,47 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { authState, clearSession, getWorkspaceRoute, isAdmin, isAuthenticated, logout } from '../services/api'
+import CommandSnippet from './CommandSnippet.vue'
+import InfoModal from './InfoModal.vue'
+import {
+  authState,
+  clearSession,
+  fetchPublicConfig,
+  getUserDisplayName,
+  getWorkspaceRoute,
+  isAdmin,
+  isAuthenticated,
+  logout,
+} from '../services/api'
 
-defineProps({
-  tabs: {
-    type: Array,
-    default: () => [],
-  },
-  activeTab: {
-    type: String,
-    default: '',
-  },
-})
-
-const emit = defineEmits(['tab-select'])
 const route = useRoute()
 const router = useRouter()
+const infoTabs = [
+  { key: 'guide', label: '使用教程' },
+  { key: 'cli', label: '安装 CLI' },
+]
+const activeInfoTab = ref('')
+const cliInstallCommand = ref('')
+const publicConfigLoading = ref(false)
+const publicConfigError = ref('')
 
 const loggedIn = computed(() => isAuthenticated())
+const isInfoModalOpen = computed(() => Boolean(activeInfoTab.value))
 const workspaceLabel = computed(() => (isAdmin() ? '工作台' : '我的 Skill'))
+const infoModalTitle = computed(() => (activeInfoTab.value === 'cli' ? '安装 CLI' : '使用教程'))
+const infoModalSummary = computed(() =>
+  activeInfoTab.value === 'cli'
+    ? '先安装 ssc-skills CLI，再通过首页复制具体 Skill 安装命令。'
+    : '教程与安装入口已固定在顶部导航，登录前后都可以随时打开。',
+)
 const userBadge = computed(() => {
   if (!authState.user) {
     return ''
   }
-  return `${authState.user.username} · ${authState.user.role === 'ADMIN' ? '管理员' : '普通用户'}`
+  const displayName = getUserDisplayName(authState.user)
+  const label = displayName === authState.user.username ? displayName : `${displayName} (${authState.user.username})`
+  return `${label} · ${authState.user.role === 'ADMIN' ? '管理员' : '普通用户'}`
 })
 const loginTarget = computed(() => {
   if (route.name === 'login') {
@@ -34,8 +50,32 @@ const loginTarget = computed(() => {
   return { name: 'login', query: { redirect: route.fullPath } }
 })
 
-function handleTabClick(tabKey) {
-  emit('tab-select', tabKey)
+async function loadPublicConfig() {
+  if (publicConfigLoading.value || cliInstallCommand.value) {
+    return
+  }
+
+  publicConfigLoading.value = true
+  publicConfigError.value = ''
+  try {
+    const payload = await fetchPublicConfig()
+    cliInstallCommand.value = payload.cli_install_command || ''
+  } catch (err) {
+    publicConfigError.value = err.message || 'CLI 安装命令暂时不可用，请稍后重试。'
+  } finally {
+    publicConfigLoading.value = false
+  }
+}
+
+function handleInfoTabClick(tabKey) {
+  activeInfoTab.value = activeInfoTab.value === tabKey ? '' : tabKey
+  if (activeInfoTab.value === 'cli') {
+    loadPublicConfig()
+  }
+}
+
+function closeInfoModal() {
+  activeInfoTab.value = ''
 }
 
 async function handleLogout() {
@@ -46,6 +86,10 @@ async function handleLogout() {
     router.push({ name: 'login' })
   }
 }
+
+onMounted(() => {
+  loadPublicConfig()
+})
 </script>
 
 <template>
@@ -53,14 +97,22 @@ async function handleLogout() {
     <div class="site-header__inner">
       <router-link class="site-header__brand" to="/">SSC Skills Library</router-link>
       <nav class="site-header__nav">
-        <router-link class="site-header__link" to="/">Skills</router-link>
+        <router-link
+          class="site-header__link"
+          to="/"
+          active-class="site-header__link--route-active"
+          exact-active-class="is-active"
+        >
+          Skills
+        </router-link>
         <button
-          v-for="tab in tabs"
+          v-for="tab in infoTabs"
           :key="tab.key"
           class="site-header__link site-header__link--button"
-          :class="{ 'is-active': activeTab === tab.key }"
+          :class="{ 'is-active': activeInfoTab === tab.key }"
           type="button"
-          @click="handleTabClick(tab.key)"
+          :aria-pressed="activeInfoTab === tab.key"
+          @click="handleInfoTabClick(tab.key)"
         >
           {{ tab.label }}
         </button>
@@ -76,4 +128,30 @@ async function handleLogout() {
       </nav>
     </div>
   </header>
+  <InfoModal
+    :open="isInfoModalOpen"
+    :title="infoModalTitle"
+    :summary="infoModalSummary"
+    width="720px"
+    @close="closeInfoModal"
+  >
+    <ol v-if="activeInfoTab === 'guide'" class="info-modal__list">
+      <li>先点击“安装 CLI”，复制并执行 ssc-skills CLI 安装命令。</li>
+      <li>通过首页 Tab 在本地库与 skills.sh 之间切换。</li>
+      <li>切到 skills.sh 后向下滚动，可按瀑布流方式持续加载更多 Skill。</li>
+      <li>登录进入工作台后，顶部导航依旧保留这两个入口，避免关键帮助信息突然消失。</li>
+    </ol>
+    <CommandSnippet
+      v-else-if="activeInfoTab === 'cli' && cliInstallCommand"
+      label="CLI 安装命令"
+      :command="cliInstallCommand"
+      compact
+    />
+    <section v-else-if="activeInfoTab === 'cli' && publicConfigError" class="feedback feedback--error feedback--inline">
+      {{ publicConfigError }}
+    </section>
+    <section v-else-if="activeInfoTab === 'cli'" class="feedback feedback--inline">
+      正在加载 CLI 安装命令...
+    </section>
+  </InfoModal>
 </template>

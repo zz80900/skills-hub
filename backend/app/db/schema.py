@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.security import hash_password
 from app.db.base import Base
-from app.models.user import Role, User
+from app.models.user import Role, User, USER_SOURCE_LOCAL
 from app.services.user_service import ROLE_ADMIN, ROLE_USER
 
 
@@ -16,15 +16,22 @@ SKILL_COLUMNS = {
     "deleted_at": "ALTER TABLE skills ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE",
     "owner_id": "ALTER TABLE skills ADD COLUMN owner_id INTEGER",
 }
+USER_COLUMNS = {
+    "source": f"ALTER TABLE users ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT '{USER_SOURCE_LOCAL}'",
+    "display_name": "ALTER TABLE users ADD COLUMN display_name VARCHAR(128)",
+    "external_principal": "ALTER TABLE users ADD COLUMN external_principal VARCHAR(255)",
+}
 
 
 def ensure_schema_compatibility(engine: Engine) -> None:
     Base.metadata.tables["roles"].create(bind=engine, checkfirst=True)
     Base.metadata.tables["users"].create(bind=engine, checkfirst=True)
     Base.metadata.tables["skill_versions"].create(bind=engine, checkfirst=True)
-    default_admin_id = _ensure_access_control_seed_data(engine)
-
     inspector = inspect(engine)
+    _ensure_user_columns(engine, inspector)
+    _backfill_user_sources(engine)
+
+    default_admin_id = _ensure_access_control_seed_data(engine)
     table_names = set(inspector.get_table_names())
     if "skills" not in table_names:
         return
@@ -49,6 +56,37 @@ def _ensure_skill_columns(engine: Engine, inspector) -> None:
         if all(name in refreshed_column_names for name in missing_columns):
             return
         raise
+
+
+def _ensure_user_columns(engine: Engine, inspector) -> None:
+    column_names = {column["name"] for column in inspector.get_columns("users")}
+    missing_columns = {name: ddl for name, ddl in USER_COLUMNS.items() if name not in column_names}
+    if not missing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            for ddl in missing_columns.values():
+                connection.execute(text(ddl))
+    except SQLAlchemyError:
+        refreshed_column_names = {column["name"] for column in inspect(engine).get_columns("users")}
+        if all(name in refreshed_column_names for name in missing_columns):
+            return
+        raise
+
+
+def _backfill_user_sources(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE users
+                SET source = :source
+                WHERE source IS NULL OR TRIM(source) = ''
+                """
+            ),
+            {"source": USER_SOURCE_LOCAL},
+        )
 
 
 def _backfill_skill_versions(engine: Engine) -> None:
@@ -142,6 +180,7 @@ def _ensure_access_control_seed_data(engine: Engine) -> int:
                 username=seed_username,
                 password_hash=hash_password(seed_password),
                 role_id=admin_role.id,
+                source=USER_SOURCE_LOCAL,
                 is_active=True,
             )
             session.add(admin_user)
@@ -150,6 +189,8 @@ def _ensure_access_control_seed_data(engine: Engine) -> int:
                 admin_user.role_id = admin_role.id
             if not admin_user.is_active:
                 admin_user.is_active = True
+            if not admin_user.source:
+                admin_user.source = USER_SOURCE_LOCAL
             session.add(admin_user)
 
         session.commit()

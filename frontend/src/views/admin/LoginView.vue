@@ -37,7 +37,7 @@ async function handleSubmit() {
         <div class="admin-panel__heading">
           <p class="eyebrow">登录</p>
           <h1>进入 Skill 工作台</h1>
-          <p>管理员可查看全部 Skill 和用户列表，普通用户仅可管理自己上传的 Skill。</p>
+          <p>系统优先校验本地账号；本地不存在时自动转 AD 域认证，并在首次成功登录后同步姓名。</p>
         </div>
 
         <form class="form-card" @submit.prevent="handleSubmit">

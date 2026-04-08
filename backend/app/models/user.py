@@ -7,6 +7,10 @@ from sqlalchemy.sql import expression
 from app.db.base import Base
 
 
+USER_SOURCE_LOCAL = "LOCAL"
+USER_SOURCE_AD = "AD"
+
+
 class Role(Base):
     __tablename__ = "roles"
 
@@ -24,6 +28,14 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=USER_SOURCE_LOCAL,
+        server_default=USER_SOURCE_LOCAL,
+    )
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    external_principal: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

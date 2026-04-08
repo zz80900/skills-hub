@@ -3,7 +3,14 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
-import { authState, createUser, fetchUsers, resetUserPassword, updateUser } from '../../services/api'
+import {
+  authState,
+  createUser,
+  fetchUsers,
+  getUserDisplayName,
+  resetUserPassword,
+  updateUser,
+} from '../../services/api'
 
 const router = useRouter()
 const loading = ref(false)
@@ -12,6 +19,7 @@ const resettingId = ref(null)
 const error = ref('')
 const users = ref([])
 const editingUserId = ref(null)
+const editingUserSource = ref('LOCAL')
 const form = reactive({
   username: '',
   password: '',
@@ -20,6 +28,7 @@ const form = reactive({
 })
 
 const isEditMode = computed(() => editingUserId.value !== null)
+const isEditingAdUser = computed(() => isEditMode.value && editingUserSource.value === 'AD')
 const submitLabel = computed(() => {
   if (submitting.value) {
     return '提交中...'
@@ -42,6 +51,7 @@ function formatDate(value) {
 
 function resetForm() {
   editingUserId.value = null
+  editingUserSource.value = 'LOCAL'
   form.username = ''
   form.password = ''
   form.role = 'USER'
@@ -65,6 +75,7 @@ async function loadUsers() {
 
 function startEdit(user) {
   editingUserId.value = user.id
+  editingUserSource.value = user.source
   form.username = user.username
   form.password = ''
   form.role = user.role
@@ -99,6 +110,10 @@ async function handleSubmit() {
 }
 
 async function handlePasswordReset(user) {
+  if (user.source === 'AD') {
+    error.value = 'AD 用户密码由域控管理，不支持本地重置'
+    return
+  }
   const nextPassword = window.prompt(`请输入用户「${user.username}」的新密码`)
   if (!nextPassword) {
     return
@@ -129,6 +144,10 @@ async function quickToggle(user) {
 onMounted(() => {
   loadUsers()
 })
+
+function formatSource(source) {
+  return source === 'AD' ? 'AD 域' : '本地'
+}
 </script>
 
 <template>
@@ -151,14 +170,21 @@ onMounted(() => {
           <div class="admin-panel__heading">
             <p class="eyebrow">{{ isEditMode ? '编辑用户' : '新增用户' }}</p>
             <h2>{{ isEditMode ? '修改账号信息' : '创建新账号' }}</h2>
-            <p>{{ isEditMode ? '编辑用户名、角色和启用状态，密码通过单独操作重置。' : '由管理员创建用户账号，普通用户不能自助注册。' }}</p>
+            <p>
+              {{
+                isEditMode
+                  ? '可编辑角色和启用状态；本地用户可重置密码，AD 用户账号信息由域控同步。'
+                  : '管理员只能手工创建本地账号，AD 用户会在首次登录时自动建档。'
+              }}
+            </p>
           </div>
 
           <form class="form-card" @submit.prevent="handleSubmit">
             <label class="field">
               <span>用户名</span>
-              <input v-model="form.username" class="text-input" type="text" />
+              <input v-model="form.username" class="text-input" type="text" :disabled="isEditingAdUser" />
             </label>
+            <p v-if="isEditingAdUser" class="feedback">AD 用户名由域账号映射，不支持手动修改。</p>
             <label v-if="!isEditMode" class="field">
               <span>初始密码</span>
               <input v-model="form.password" class="text-input" type="password" />
@@ -195,6 +221,8 @@ onMounted(() => {
               <thead>
                 <tr>
                   <th scope="col">用户名</th>
+                  <th scope="col">姓名</th>
+                  <th scope="col">来源</th>
                   <th scope="col">角色</th>
                   <th scope="col">状态</th>
                   <th scope="col">创建时间</th>
@@ -207,8 +235,11 @@ onMounted(() => {
                     <div class="user-table__title">
                       <strong>{{ user.username }}</strong>
                       <small v-if="authState.user?.id === user.id">当前登录账号</small>
+                      <small v-else-if="user.external_principal">{{ user.external_principal }}</small>
                     </div>
                   </td>
+                  <td>{{ getUserDisplayName(user) }}</td>
+                  <td>{{ formatSource(user.source) }}</td>
                   <td>{{ user.role === 'ADMIN' ? '管理员' : '普通用户' }}</td>
                   <td>
                     <span class="status-chip" :class="{ 'status-chip--deleted': !user.is_active }">
@@ -225,10 +256,10 @@ onMounted(() => {
                       <button
                         class="button button--ghost"
                         type="button"
-                        :disabled="resettingId === user.id"
+                        :disabled="resettingId === user.id || user.source === 'AD'"
                         @click="handlePasswordReset(user)"
                       >
-                        {{ resettingId === user.id ? '处理中...' : '重置密码' }}
+                        {{ resettingId === user.id ? '处理中...' : user.source === 'AD' ? '域控管理' : '重置密码' }}
                       </button>
                     </div>
                   </td>

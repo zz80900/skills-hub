@@ -26,6 +26,10 @@ class SkillListResponse(BaseModel):
     remote_has_more: bool = False
 
 
+class PublicConfigResponse(BaseModel):
+    cli_install_command: str
+
+
 class PublicSkillDetail(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

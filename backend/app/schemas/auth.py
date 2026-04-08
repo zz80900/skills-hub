@@ -10,6 +10,8 @@ class AuthenticatedUser(BaseModel):
     id: int
     username: str
     role: str
+    source: str
+    display_name: str | None = None
 
 
 class LoginResponse(BaseModel):

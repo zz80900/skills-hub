@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.cache/
+backend/pytest-cache-files-*/
 .venv/
 .mypy_cache/
 .ruff_cache/

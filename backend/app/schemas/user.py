@@ -9,6 +9,9 @@ class UserSummary(BaseModel):
     id: int
     username: str
     role: str
+    source: str
+    display_name: str | None = None
+    external_principal: str | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

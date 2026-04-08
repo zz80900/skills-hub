@@ -21,7 +21,11 @@ function readUser() {
     if (typeof parsed.id !== 'number' || typeof parsed.username !== 'string' || typeof parsed.role !== 'string') {
       return null
     }
-    return parsed
+    return {
+      ...parsed,
+      source: typeof parsed.source === 'string' ? parsed.source : 'LOCAL',
+      display_name: typeof parsed.display_name === 'string' && parsed.display_name.trim() ? parsed.display_name : null,
+    }
   } catch {
     return null
   }
@@ -31,6 +35,9 @@ export const authState = reactive({
   token: readToken(),
   user: readUser(),
 })
+
+let publicConfigCache = null
+let publicConfigRequest = null
 
 if (authState.token && !authState.user) {
   window.localStorage.removeItem(TOKEN_KEY)
@@ -127,6 +134,13 @@ export function getCurrentUser() {
   return authState.user
 }
 
+export function getUserDisplayName(user) {
+  if (!user) {
+    return ''
+  }
+  return user.display_name || user.username
+}
+
 export function setSession(token, user) {
   authState.token = token
   authState.user = user
@@ -143,6 +157,25 @@ export function clearSession() {
 
 export function getWorkspaceRoute() {
   return '/workspace'
+}
+
+export async function fetchPublicConfig() {
+  if (publicConfigCache) {
+    return publicConfigCache
+  }
+
+  if (!publicConfigRequest) {
+    publicConfigRequest = request(buildUrl('/api/public-config'))
+      .then((payload) => {
+        publicConfigCache = payload
+        return payload
+      })
+      .finally(() => {
+        publicConfigRequest = null
+      })
+  }
+
+  return publicConfigRequest
 }
 
 export async function fetchSkills(query, options = {}) {

@@ -2,8 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import CommandSnippet from '../../components/CommandSnippet.vue'
-import InfoModal from '../../components/InfoModal.vue'
 import SiteHeader from '../../components/SiteHeader.vue'
 import SkillCard from '../../components/SkillCard.vue'
 import SkillDetailModal from '../../components/SkillDetailModal.vue'
@@ -18,7 +16,6 @@ const remoteError = ref('')
 const search = ref('')
 const localSkills = ref([])
 const remoteSkills = ref([])
-const cliInstallCommand = ref('')
 const detailLoading = ref(false)
 const detailError = ref('')
 const selectedSkill = ref(null)
@@ -31,29 +28,15 @@ let searchTimer = null
 let detailRequestId = 0
 let remoteObserver = null
 
-const infoTabs = [
-  { key: 'guide', label: '使用教程' },
-  { key: 'cli', label: '安装 CLI' },
-]
 const libraryTabs = [
   { key: 'local', label: '本地库' },
   { key: 'skills_sh', label: 'skills.sh' },
 ]
 
-const activeInfoTab = computed(() =>
-  infoTabs.some((tab) => tab.key === route.query.panel) ? route.query.panel : '',
-)
 const activeLibraryTab = computed(() =>
   libraryTabs.some((tab) => tab.key === route.query.tab) ? route.query.tab : 'local',
 )
 const isSkillModalOpen = computed(() => Boolean(route.query.skill))
-const isInfoModalOpen = computed(() => Boolean(activeInfoTab.value))
-const infoModalTitle = computed(() => (activeInfoTab.value === 'cli' ? '安装 CLI' : '使用教程'))
-const infoModalSummary = computed(() =>
-  activeInfoTab.value === 'cli'
-    ? '先安装 ssc-skills CLI，再通过首页复制具体 Skill 安装命令。'
-    : '本地库和 skills.sh 通过 Tab 切换展示，skills.sh 支持瀑布流加载。',
-)
 const activeDetailSource = computed(() =>
   typeof route.query.source === 'string' && route.query.source ? route.query.source : 'local',
 )
@@ -72,6 +55,7 @@ const remoteTabSummary = computed(() => {
 
 function buildHomeQuery(overrides = {}) {
   const nextQuery = { ...route.query, ...overrides }
+  delete nextQuery.panel
   Object.keys(nextQuery).forEach((key) => {
     if (nextQuery[key] === undefined || nextQuery[key] === null || nextQuery[key] === '') {
       delete nextQuery[key]
@@ -108,7 +92,6 @@ async function loadSkills(keyword = '', options = {}) {
   try {
     const payload = await fetchSkills(keyword, { page: nextPage, pageSize: remotePageSize.value })
     localSkills.value = payload.local_items || []
-    cliInstallCommand.value = payload.cli_install_command
     remoteError.value = payload.remote_error || ''
     remotePage.value = payload.remote_page || nextPage
     remotePageSize.value = payload.remote_page_size || remotePageSize.value
@@ -167,14 +150,6 @@ async function loadSkillDetail(source, slug, version = '') {
   }
 }
 
-function handleInfoTabSelect(tabKey) {
-  const nextTab = activeInfoTab.value === tabKey ? null : tabKey
-  router.replace({
-    name: 'home',
-    query: buildHomeQuery({ panel: nextTab }),
-  })
-}
-
 function handleLibraryTabSelect(tabKey) {
   router.replace({
     name: 'home',
@@ -200,13 +175,6 @@ function handleDetailVersionSelect(version) {
   router.replace({
     name: 'home',
     query: buildHomeQuery({ version }),
-  })
-}
-
-function closeInfoModal() {
-  router.replace({
-    name: 'home',
-    query: buildHomeQuery({ panel: null }),
   })
 }
 
@@ -298,7 +266,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page-shell">
-    <SiteHeader :tabs="infoTabs" :active-tab="activeInfoTab" @tab-select="handleInfoTabSelect" />
+    <SiteHeader />
     <main class="page-content">
       <section class="search-panel search-panel--home">
         <label class="search-field search-field--inline" for="skill-search">
@@ -392,25 +360,6 @@ onBeforeUnmount(() => {
       @version-select="handleDetailVersionSelect"
       @close="closeSkillDetail"
     />
-    <InfoModal
-      :open="isInfoModalOpen"
-      :title="infoModalTitle"
-      :summary="infoModalSummary"
-      width="720px"
-      @close="closeInfoModal"
-    >
-      <ol v-if="activeInfoTab === 'guide'" class="info-modal__list">
-        <li>先点击“安装 CLI”，复制并执行 ssc-skills CLI 安装命令。</li>
-        <li>通过上方 Tab 在本地库与 skills.sh 之间切换。</li>
-        <li>切到 skills.sh 后向下滚动，可按瀑布流方式持续加载更多 Skill。</li>
-      </ol>
-      <CommandSnippet
-        v-else-if="activeInfoTab === 'cli'"
-        label="CLI 安装命令"
-        :command="cliInstallCommand"
-        compact
-      />
-    </InfoModal>
     <transition name="back-to-top-fade">
       <button
         v-if="showBackToTop"

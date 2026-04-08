@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.deps import DbSession
 from app.core.config import get_settings
-from app.schemas.skill import PublicSkillDetail, PublicSkillSummary, SkillListResponse
+from app.schemas.skill import PublicConfigResponse, PublicSkillDetail, PublicSkillSummary, SkillListResponse
 from app.services.skill_service import (
     PUBLIC_SOURCE_LOCAL,
     get_skill_by_name,
@@ -24,6 +24,12 @@ from app.services.skills_registry import (
 
 
 router = APIRouter(prefix="/api", tags=["public"])
+
+
+@router.get("/public-config", response_model=PublicConfigResponse)
+async def get_public_config():
+    settings = get_settings()
+    return PublicConfigResponse(cli_install_command=settings.cli_install_command)
 
 
 @router.get("/skills", response_model=SkillListResponse)

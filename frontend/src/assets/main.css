@@ -818,6 +818,10 @@ pre {
   border-color: rgba(152, 47, 36, 0.18);
 }
 
+.feedback--inline {
+  margin-top: 0;
+}
+
 .detail-panel {
   margin-top: 24px;
   padding: 28px;

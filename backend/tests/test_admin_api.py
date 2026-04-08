@@ -26,6 +26,8 @@ from app.db.base import Base
 from app.db.schema import ensure_schema_compatibility
 from app.db.session import engine
 from app.main import app
+from app.services import user_service
+from app.services.ad_auth import ActiveDirectoryIdentity
 from app.services import nexus as nexus_service
 from app.services.skills_registry import RegistrySkillDetail, RegistrySkillSummary
 
@@ -102,6 +104,29 @@ def create_local_skill(
     return response
 
 
+def make_ad_identity(
+    username: str,
+    *,
+    display_name: str = "Alice Zhang",
+    external_principal: str | None = None,
+) -> ActiveDirectoryIdentity:
+    normalized_username = username.lower()
+    principal = f"{normalized_username}@XGD.COM"
+    return ActiveDirectoryIdentity(
+        username=normalized_username,
+        principal=principal,
+        display_name=display_name,
+        name_source="displayName",
+        external_principal=external_principal or principal,
+        distinguished_name=f"CN={normalized_username},OU=Users,DC=xgd,DC=com",
+        attributes={
+            "displayName": [display_name],
+            "sAMAccountName": [normalized_username],
+            "userPrincipalName": [external_principal or principal],
+        },
+    )
+
+
 def test_login_success(client: TestClient):
     response = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
     assert response.status_code == 200
@@ -109,6 +134,8 @@ def test_login_success(client: TestClient):
     assert payload["token_type"] == "bearer"
     assert payload["user"]["username"] == "admin"
     assert payload["user"]["role"] == "ADMIN"
+    assert payload["user"]["source"] == "LOCAL"
+    assert payload["user"]["display_name"] is None
 
 
 def test_app_healthcheck(client: TestClient):
@@ -121,6 +148,7 @@ def test_admin_user_management_endpoints(client: TestClient):
     admin_headers = auth_headers(client)
     create_response = create_user_account(client, admin_headers, "viewer", "viewer-pass", role="USER")
     assert create_response["role"] == "USER"
+    assert create_response["source"] == "LOCAL"
     assert create_response["is_active"] is True
 
     list_response = client.get("/api/admin/users", headers=admin_headers)
@@ -158,6 +186,115 @@ def test_admin_user_management_endpoints(client: TestClient):
     relogin_response = client.post("/api/auth/login", json={"username": "viewer", "password": "new-viewer-pass"})
     assert relogin_response.status_code == 200
     assert relogin_response.json()["user"]["role"] == "ADMIN"
+    assert relogin_response.json()["user"]["source"] == "LOCAL"
+
+
+def test_local_user_does_not_fallback_to_ad(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    create_user_account(client, admin_headers, "alice", "local-pass")
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("local auth should not call AD")
+
+    monkeypatch.setattr(user_service, "authenticate_active_directory_user", fail_if_called)
+
+    response = client.post("/api/auth/login", json={"username": "alice", "password": "wrong-pass"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "用户名或密码错误"
+
+
+def test_ad_login_provisions_user(client: TestClient, monkeypatch):
+    def fake_auth(username: str, password: str) -> ActiveDirectoryIdentity:
+        assert username == "alice"
+        assert password == "alice-pass"
+        return make_ad_identity("alice", display_name="艾丽丝")
+
+    monkeypatch.setattr(user_service, "authenticate_active_directory_user", fake_auth)
+
+    response = client.post("/api/auth/login", json={"username": "alice", "password": "alice-pass"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["user"]["username"] == "alice"
+    assert payload["user"]["role"] == "USER"
+    assert payload["user"]["source"] == "AD"
+    assert payload["user"]["display_name"] == "艾丽丝"
+
+    admin_headers = auth_headers(client)
+    users_response = client.get("/api/admin/users", headers=admin_headers)
+    assert users_response.status_code == 200
+    alice = next(item for item in users_response.json() if item["username"] == "alice")
+    assert alice["source"] == "AD"
+    assert alice["display_name"] == "艾丽丝"
+    assert alice["external_principal"] == "alice@XGD.COM"
+
+
+def test_existing_ad_user_login_syncs_profile(client: TestClient, monkeypatch):
+    identities = iter(
+        [
+            make_ad_identity("alice", display_name="艾丽丝"),
+            make_ad_identity("alice", display_name="艾丽丝-更新"),
+        ]
+    )
+
+    monkeypatch.setattr(user_service, "authenticate_active_directory_user", lambda *_args, **_kwargs: next(identities))
+
+    first_login = client.post("/api/auth/login", json={"username": "XGD\\alice", "password": "alice-pass"})
+    assert first_login.status_code == 200
+    assert first_login.json()["user"]["display_name"] == "艾丽丝"
+
+    second_login = client.post("/api/auth/login", json={"username": "alice@xgd.com", "password": "alice-pass"})
+    assert second_login.status_code == 200
+    assert second_login.json()["user"]["source"] == "AD"
+    assert second_login.json()["user"]["display_name"] == "艾丽丝-更新"
+
+    admin_headers = auth_headers(client)
+    users_response = client.get("/api/admin/users", headers=admin_headers)
+    alice = next(item for item in users_response.json() if item["username"] == "alice")
+    assert alice["display_name"] == "艾丽丝-更新"
+
+
+def test_reset_password_rejects_ad_user(client: TestClient, monkeypatch):
+    monkeypatch.setattr(
+        user_service,
+        "authenticate_active_directory_user",
+        lambda *_args, **_kwargs: make_ad_identity("alice", display_name="艾丽丝"),
+    )
+    login_response = client.post("/api/auth/login", json={"username": "alice", "password": "alice-pass"})
+    assert login_response.status_code == 200
+
+    admin_headers = auth_headers(client)
+    users_response = client.get("/api/admin/users", headers=admin_headers)
+    alice_id = next(item["id"] for item in users_response.json() if item["username"] == "alice")
+
+    reset_response = client.put(
+        f"/api/admin/users/{alice_id}/password",
+        headers=admin_headers,
+        json={"password": "new-pass"},
+    )
+    assert reset_response.status_code == 422
+    assert reset_response.json()["detail"] == "AD 用户密码由域控管理，不支持本地重置"
+
+
+def test_rename_ad_user_rejected(client: TestClient, monkeypatch):
+    monkeypatch.setattr(
+        user_service,
+        "authenticate_active_directory_user",
+        lambda *_args, **_kwargs: make_ad_identity("alice", display_name="艾丽丝"),
+    )
+    login_response = client.post("/api/auth/login", json={"username": "alice", "password": "alice-pass"})
+    assert login_response.status_code == 200
+
+    admin_headers = auth_headers(client)
+    users_response = client.get("/api/admin/users", headers=admin_headers)
+    alice_id = next(item["id"] for item in users_response.json() if item["username"] == "alice")
+
+    update_response = client.put(
+        f"/api/admin/users/{alice_id}",
+        headers=admin_headers,
+        json={"username": "alice-new"},
+    )
+    assert update_response.status_code == 422
+    assert update_response.json()["detail"] == "AD 用户用户名由域账号映射，不支持手动修改"
 
 
 def test_non_admin_cannot_manage_users(client: TestClient):
@@ -365,8 +502,10 @@ def test_schema_compatibility_adds_access_control_and_backfills_owner():
     ensure_schema_compatibility(engine)
 
     columns = {column["name"] for column in inspect(engine).get_columns("skills")}
+    user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
     table_names = set(inspect(engine).get_table_names())
     assert {"contributor", "current_version", "deleted_at", "owner_id"}.issubset(columns)
+    assert {"source", "display_name", "external_principal"}.issubset(user_columns)
     assert {"skill_versions", "roles", "users"}.issubset(table_names)
 
     with engine.begin() as connection:
@@ -377,12 +516,13 @@ def test_schema_compatibility_adds_access_control_and_backfills_owner():
             text("SELECT version FROM skill_versions WHERE skill_id = 1")
         ).mappings().one()
         admin_row = connection.execute(
-            text("SELECT id, username FROM users WHERE username = 'admin'")
+            text("SELECT id, username, source FROM users WHERE username = 'admin'")
         ).mappings().one()
         role_rows = connection.execute(text("SELECT name FROM roles ORDER BY name")).mappings().all()
 
     assert skill_row["current_version"] == "1.0.0"
     assert skill_row["owner_id"] == admin_row["id"]
+    assert admin_row["source"] == "LOCAL"
     assert version_row["version"] == "1.0.0"
     assert [row["name"] for row in role_rows] == ["ADMIN", "USER"]
 
@@ -457,6 +597,12 @@ def test_public_remote_failure_does_not_break_local_results(client: TestClient, 
     assert payload["local_items"][0]["name"] == "demo-skill"
     assert payload["remote_items"] == []
     assert payload["remote_error"] == "skills.sh 数据暂时不可用，请稍后重试。"
+
+
+def test_public_config_returns_cli_install_command(client: TestClient):
+    response = client.get("/api/public-config")
+    assert response.status_code == 200
+    assert response.json()["cli_install_command"].startswith("npm install @xgd/ssc-skills -g")
 
 
 def test_public_remote_pagination_uses_page_arguments(client, monkeypatch):
