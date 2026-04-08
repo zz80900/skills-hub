@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import DbSession, get_current_user
@@ -9,6 +11,7 @@ from app.services.user_service import authenticate_user, to_authenticated_user
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -16,6 +19,7 @@ def login(payload: LoginRequest, session: DbSession):
     try:
         user = authenticate_user(session, payload.username, payload.password)
     except ActiveDirectoryUnavailableError as exc:
+        logger.warning("AD authentication unavailable during login for username=%s: %s", payload.username, exc)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AD 认证服务暂不可用") from exc
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")

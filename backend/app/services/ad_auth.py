@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from app.core.config import get_settings
 
@@ -138,8 +139,11 @@ class ActiveDirectoryAuthenticator:
         except ImportError as exc:
             raise ActiveDirectoryUnavailableError("missing python dependency: ldap3") from exc
 
+        ldap_host, ldap_port, ldap_use_ssl = parse_ldap_server_url(self._settings.ad_ldap_url)
         server = ldap3.Server(
-            self._settings.ad_ldap_url,
+            ldap_host,
+            port=ldap_port,
+            use_ssl=ldap_use_ssl,
             get_info=ldap3.NONE,
             connect_timeout=self._settings.ad_ldap_timeout_seconds,
         )
@@ -260,6 +264,27 @@ def build_search_bases(*, base_dn: str, realm: str, domain_root_dn: str) -> list
     normalized_base_dn = normalize_base_dn(base_dn, realm)
     fallback_root = (domain_root_dn or "").strip() or build_domain_root_dn(realm)
     return dedupe_strings([normalized_base_dn, fallback_root])
+
+
+def parse_ldap_server_url(ldap_url: str) -> tuple[str, int | None, bool]:
+    value = (ldap_url or "").strip()
+    if not value:
+        raise ActiveDirectoryUnavailableError("missing ldap url")
+
+    if "://" not in value:
+        host = value
+        port: int | None = None
+        if value.count(":") == 1:
+            host_candidate, port_candidate = value.rsplit(":", 1)
+            if port_candidate.isdigit():
+                host = host_candidate
+                port = int(port_candidate)
+        return host.strip(), port, False
+
+    parsed = urlparse(value)
+    if parsed.scheme not in {"ldap", "ldaps"} or not parsed.hostname:
+        raise ActiveDirectoryUnavailableError(f"invalid ldap url: {value}")
+    return parsed.hostname, parsed.port or (636 if parsed.scheme == "ldaps" else 389), parsed.scheme == "ldaps"
 
 
 def normalize_base_dn(base_dn: str, realm: str) -> str:

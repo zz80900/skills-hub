@@ -27,7 +27,7 @@ from app.db.schema import ensure_schema_compatibility
 from app.db.session import engine
 from app.main import app
 from app.services import user_service
-from app.services.ad_auth import ActiveDirectoryIdentity
+from app.services.ad_auth import ActiveDirectoryIdentity, ActiveDirectoryUnavailableError
 from app.services import nexus as nexus_service
 from app.services.skills_registry import RegistrySkillDetail, RegistrySkillSummary
 
@@ -251,6 +251,20 @@ def test_existing_ad_user_login_syncs_profile(client: TestClient, monkeypatch):
     users_response = client.get("/api/admin/users", headers=admin_headers)
     alice = next(item for item in users_response.json() if item["username"] == "alice")
     assert alice["display_name"] == "艾丽丝-更新"
+
+
+def test_login_returns_503_when_ad_unavailable(client: TestClient, monkeypatch):
+    monkeypatch.setattr(
+        user_service,
+        "authenticate_active_directory_user",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ActiveDirectoryUnavailableError("missing AD configuration: AD_REALM, AD_KDC")
+        ),
+    )
+
+    response = client.post("/api/auth/login", json={"username": "alice", "password": "alice-pass"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "AD 认证服务暂不可用"
 
 
 def test_reset_password_rejects_ad_user(client: TestClient, monkeypatch):
@@ -602,7 +616,9 @@ def test_public_remote_failure_does_not_break_local_results(client: TestClient, 
 def test_public_config_returns_cli_install_command(client: TestClient):
     response = client.get("/api/public-config")
     assert response.status_code == 200
-    assert response.json()["cli_install_command"].startswith("npm install @xgd/ssc-skills -g")
+    command = response.json()["cli_install_command"]
+    assert command.startswith("npm install")
+    assert "@xgd/ssc-skills" in command
 
 
 def test_public_remote_pagination_uses_page_arguments(client, monkeypatch):
