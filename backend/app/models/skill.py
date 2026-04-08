@@ -11,6 +11,7 @@ class Skill(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     description_markdown: Mapped[str] = mapped_column(Text, nullable=False, default="")
     description_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
     contributor: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -33,6 +34,7 @@ class Skill(Base):
         cascade="all, delete-orphan",
         order_by="SkillVersion.id.desc()",
     )
+    owner: Mapped["User"] = relationship(back_populates="skills", lazy="joined")
 
 
 class SkillVersion(Base):

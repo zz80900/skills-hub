@@ -9,7 +9,7 @@ from app.services.skill_service import (
     get_skill_by_name,
     get_skill_version,
     get_skill_versions,
-    search_skills,
+    search_public_skills,
     to_public_skill_detail as to_local_public_skill_detail,
     to_public_skill_summary as to_local_public_skill_summary,
     to_public_skill_version_detail,
@@ -36,7 +36,7 @@ async def list_skills(
     settings = get_settings()
     local_items = [
         PublicSkillSummary.model_validate(to_local_public_skill_summary(skill))
-        for skill in search_skills(session, q)
+        for skill in search_public_skills(session, q)
     ]
 
     remote_items: list[PublicSkillSummary] = []

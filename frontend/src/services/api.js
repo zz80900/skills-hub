@@ -1,5 +1,41 @@
+import { reactive } from 'vue'
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
-const TOKEN_KEY = 'ssc-skills-admin-token'
+const TOKEN_KEY = 'ssc-skills-session-token'
+const USER_KEY = 'ssc-skills-session-user'
+
+function readToken() {
+  return window.localStorage.getItem(TOKEN_KEY)
+}
+
+function readUser() {
+  const raw = window.localStorage.getItem(USER_KEY)
+  if (!raw) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') {
+      return null
+    }
+    if (typeof parsed.id !== 'number' || typeof parsed.username !== 'string' || typeof parsed.role !== 'string') {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export const authState = reactive({
+  token: readToken(),
+  user: readUser(),
+})
+
+if (authState.token && !authState.user) {
+  window.localStorage.removeItem(TOKEN_KEY)
+  authState.token = null
+}
 
 function buildUrl(path, params) {
   const url = new URL(`${API_BASE}${path}`, window.location.origin)
@@ -51,9 +87,8 @@ function normalizeSkillPayload(payload) {
 
 async function request(path, options = {}) {
   const headers = new Headers(options.headers || {})
-  const token = getToken()
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`)
+  if (authState.token) {
+    headers.set('Authorization', `Bearer ${authState.token}`)
   }
 
   const isFormData = options.body instanceof FormData
@@ -72,21 +107,42 @@ async function request(path, options = {}) {
 
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
+    if (response.status === 401) {
+      clearSession()
+    }
     throw new Error(payload.detail || '请求失败')
   }
   return payload
 }
 
-export function getToken() {
-  return window.localStorage.getItem(TOKEN_KEY)
+export function isAuthenticated() {
+  return Boolean(authState.token && authState.user)
 }
 
-export function setToken(token) {
+export function isAdmin() {
+  return authState.user?.role === 'ADMIN'
+}
+
+export function getCurrentUser() {
+  return authState.user
+}
+
+export function setSession(token, user) {
+  authState.token = token
+  authState.user = user
   window.localStorage.setItem(TOKEN_KEY, token)
+  window.localStorage.setItem(USER_KEY, JSON.stringify(user))
 }
 
-export function clearToken() {
+export function clearSession() {
+  authState.token = null
+  authState.user = null
   window.localStorage.removeItem(TOKEN_KEY)
+  window.localStorage.removeItem(USER_KEY)
+}
+
+export function getWorkspaceRoute() {
+  return '/workspace'
 }
 
 export async function fetchSkills(query, options = {}) {
@@ -109,27 +165,31 @@ export async function fetchLocalSkillVersion(slug, version) {
 }
 
 export function login(payload) {
-  return request(buildUrl('/api/admin/login'), {
+  return request(buildUrl('/api/auth/login'), {
     method: 'POST',
     body: JSON.stringify(payload),
   })
 }
 
 export function logout() {
-  return request(buildUrl('/api/admin/logout'), { method: 'POST' })
+  return request(buildUrl('/api/auth/logout'), { method: 'POST' })
 }
 
-export async function fetchAdminSkills(query) {
-  return (await request(buildUrl('/api/admin/skills', { q: query }))).map(normalizeSkillPayload)
+export function fetchCurrentUser() {
+  return request(buildUrl('/api/auth/me'))
 }
 
-export async function fetchAdminSkill(name) {
-  return normalizeSkillPayload(await request(buildUrl(`/api/admin/skills/${encodeURIComponent(name)}`)))
+export async function fetchWorkspaceSkills(query) {
+  return (await request(buildUrl('/api/workspace/skills', { q: query }))).map(normalizeSkillPayload)
+}
+
+export async function fetchWorkspaceSkill(name) {
+  return normalizeSkillPayload(await request(buildUrl(`/api/workspace/skills/${encodeURIComponent(name)}`)))
 }
 
 export async function createSkill(formData) {
   return normalizeSkillPayload(
-    await request(buildUrl('/api/admin/skills'), {
+    await request(buildUrl('/api/workspace/skills'), {
       method: 'POST',
       body: formData,
     }),
@@ -138,7 +198,7 @@ export async function createSkill(formData) {
 
 export async function updateSkill(name, formData) {
   return normalizeSkillPayload(
-    await request(buildUrl(`/api/admin/skills/${encodeURIComponent(name)}`), {
+    await request(buildUrl(`/api/workspace/skills/${encodeURIComponent(name)}`), {
       method: 'PUT',
       body: formData,
     }),
@@ -146,7 +206,32 @@ export async function updateSkill(name, formData) {
 }
 
 export function deleteSkill(name) {
-  return request(buildUrl(`/api/admin/skills/${encodeURIComponent(name)}`), {
+  return request(buildUrl(`/api/workspace/skills/${encodeURIComponent(name)}`), {
     method: 'DELETE',
+  })
+}
+
+export async function fetchUsers() {
+  return await request(buildUrl('/api/admin/users'))
+}
+
+export async function createUser(payload) {
+  return await request(buildUrl('/api/admin/users'), {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateUser(userId, payload) {
+  return await request(buildUrl(`/api/admin/users/${encodeURIComponent(userId)}`), {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function resetUserPassword(userId, password) {
+  return await request(buildUrl(`/api/admin/users/${encodeURIComponent(userId)}/password`), {
+    method: 'PUT',
+    body: JSON.stringify({ password }),
   })
 }

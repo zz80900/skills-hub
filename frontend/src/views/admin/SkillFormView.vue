@@ -3,11 +3,12 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
-import { createSkill, fetchAdminSkill, updateSkill } from '../../services/api'
+import { authState, createSkill, fetchWorkspaceSkill, updateSkill } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
 const isEditMode = computed(() => Boolean(route.params.name))
+const isAdmin = computed(() => authState.user?.role === 'ADMIN')
 const loading = ref(false)
 const submitting = ref(false)
 const error = ref('')
@@ -33,7 +34,7 @@ async function loadSkill() {
   loading.value = true
   error.value = ''
   try {
-    const skill = await fetchAdminSkill(route.params.name)
+    const skill = await fetchWorkspaceSkill(route.params.name)
     form.name = skill.name
     form.contributor = skill.contributor || ''
     form.description_markdown = skill.description_markdown
@@ -59,7 +60,7 @@ async function handleSubmit() {
         payload.append('zip_file', form.zip_file)
       }
       await updateSkill(form.name, payload)
-      router.push(`/admin/skills/${form.name}`)
+      router.push(`/workspace/skills/${form.name}`)
     } else {
       payload.append('name', form.name.trim())
       if (!form.zip_file) {
@@ -67,7 +68,7 @@ async function handleSubmit() {
       }
       payload.append('zip_file', form.zip_file)
       const createdSkill = await createSkill(payload)
-      router.push(`/admin/skills/${createdSkill.name}`)
+      router.push(`/workspace/skills/${createdSkill.name}`)
     }
   } catch (err) {
     error.value = err.message
@@ -87,7 +88,7 @@ onMounted(() => {
     <main class="page-content page-content--narrow">
       <section class="admin-panel">
         <div class="admin-panel__heading">
-          <p class="eyebrow">管理后台</p>
+          <p class="eyebrow">{{ isAdmin ? '工作台' : '我的 Skill' }}</p>
           <h1>{{ isEditMode ? '编辑 / 升级 Skill' : '新增 Skill' }}</h1>
           <p>上传时只支持 ZIP，并且压缩包内必须包含非空 <code>SKILL.md</code>。</p>
           <p v-if="isEditMode && currentVersion" class="admin-panel__version">
@@ -143,7 +144,7 @@ onMounted(() => {
             <button class="button" :disabled="submitting" type="submit">
               {{ submitting ? '提交中...' : isEditMode ? '保存并升级' : '创建 Skill' }}
             </button>
-            <router-link class="button button--ghost" :to="isEditMode ? `/admin/skills/${form.name}` : '/admin'">
+            <router-link class="button button--ghost" :to="isEditMode ? `/workspace/skills/${form.name}` : '/workspace'">
               {{ isEditMode ? '返回详情' : '返回列表' }}
             </router-link>
           </div>

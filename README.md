@@ -1,14 +1,16 @@
 # Skills 库管理系统
 
-基于 Vue + FastAPI + PostgreSQL 的 Skills 库管理系统，用于展示 Skill 详情、搜索 Skill，并通过管理后台上传或升级 Skill ZIP 包到私有 Nexus。
+基于 Vue + FastAPI + PostgreSQL 的 Skills 库管理系统，用于展示 Skill 详情、搜索 Skill，并通过登录工作台上传或升级 Skill ZIP 包到私有 Nexus。
 
 ## 功能
 
 - 首页展示 CLI 安装提示和 Skills 列表
 - 支持按 Skill 名称和描述搜索
 - Skill 详情页展示 Markdown 描述、安装命令和 ZIP 下载地址
-- 固定管理员 `admin/admin` 登录后台
-- 后台支持创建 Skill、上传 ZIP、升级同名 Skill
+- 采用基础 RBAC0 权限模型，固定角色为管理员和普通用户
+- 管理员账号由系统启动时自动种子化，支持后台创建用户、分配角色、停启账号和重置密码
+- 普通用户登录后仅能查看和操作自己上传的 Skill，管理员可查看全部 Skill 并看到逻辑删除状态
+- 工作台支持创建 Skill、上传 ZIP、升级同名 Skill 和逻辑删除
 - 上传时校验 ZIP 必须包含非空 `SKILL.md`
 - ZIP 上传到私有 Nexus `raw-repo/skills/{name}.zip`
 
@@ -65,9 +67,9 @@ docker compose up -d --build
 
 详细说明见 [deploy/README.md](E:/code_ai/ssc-skills-lib/deploy/README.md)。
 
-## 默认账号
+## 初始管理员账号
 
 - 用户名：`admin`
 - 密码：`admin`
 
-建议在生产环境通过环境变量覆盖。
+系统会在首次启动时自动创建该管理员账号，建议在生产环境通过环境变量覆盖初始账号密码并及时修改。

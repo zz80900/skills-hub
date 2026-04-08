@@ -1,10 +1,10 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import CommandSnippet from '../../components/CommandSnippet.vue'
 import SiteHeader from '../../components/SiteHeader.vue'
-import { deleteSkill, fetchAdminSkill } from '../../services/api'
+import { authState, deleteSkill, fetchWorkspaceSkill } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,6 +12,8 @@ const loading = ref(false)
 const deleting = ref(false)
 const error = ref('')
 const skill = ref(null)
+
+const isAdmin = computed(() => authState.user?.role === 'ADMIN')
 
 function formatDate(value) {
   if (!value) {
@@ -33,20 +35,23 @@ async function loadSkill(name) {
   loading.value = true
   error.value = ''
   try {
-    skill.value = await fetchAdminSkill(name)
+    skill.value = await fetchWorkspaceSkill(name)
   } catch (err) {
     error.value = err.message
     skill.value = null
+    if (!authState.token) {
+      router.push('/login')
+    }
   } finally {
     loading.value = false
   }
 }
 
 async function handleDelete() {
-  if (!skill.value) {
+  if (!skill.value || skill.value.is_deleted) {
     return
   }
-  if (!window.confirm(`确认删除 Skill「${skill.value.name}」吗？删除后前台与后台列表都将隐藏该 Skill。`)) {
+  if (!window.confirm(`确认删除 Skill「${skill.value.name}」吗？该操作为逻辑删除。`)) {
     return
   }
 
@@ -54,7 +59,7 @@ async function handleDelete() {
   error.value = ''
   try {
     await deleteSkill(skill.value.name)
-    router.push('/admin')
+    router.push('/workspace')
   } catch (err) {
     error.value = err.message
   } finally {
@@ -80,18 +85,34 @@ watch(
       <section v-else-if="skill" class="detail-panel">
         <div class="detail-panel__header">
           <div>
-            <p class="eyebrow">管理后台</p>
+            <p class="eyebrow">{{ isAdmin ? '工作台' : '我的 Skill' }}</p>
             <h1>{{ skill.name }}</h1>
             <p class="detail-modal__summary">当前版本 {{ skill.current_version }}</p>
           </div>
           <div class="admin-toolbar__actions admin-detail__actions">
-            <router-link class="button button--ghost" to="/admin">返回列表</router-link>
-            <router-link class="button button--ghost" :to="`/admin/skills/${skill.name}/edit`">编辑</router-link>
-            <button class="button button--danger" type="button" :disabled="deleting" @click="handleDelete">
+            <router-link class="button button--ghost" to="/workspace">返回列表</router-link>
+            <router-link
+              v-if="!skill.is_deleted"
+              class="button button--ghost"
+              :to="`/workspace/skills/${skill.name}/edit`"
+            >
+              编辑
+            </router-link>
+            <button
+              v-if="!skill.is_deleted"
+              class="button button--danger"
+              type="button"
+              :disabled="deleting"
+              @click="handleDelete"
+            >
               {{ deleting ? '删除中...' : '删除' }}
             </button>
           </div>
         </div>
+
+        <section v-if="skill.is_deleted" class="feedback">
+          当前 Skill 已被逻辑删除，仅管理员可查看删除状态。
+        </section>
 
         <div class="detail-meta">
           <div class="detail-meta__item">
@@ -102,6 +123,11 @@ watch(
           <div class="detail-meta__item">
             <span>贡献者</span>
             <code>{{ skill.contributor || '未填写' }}</code>
+          </div>
+          <div v-if="isAdmin" class="detail-meta__item">
+            <span>归属用户</span>
+            <code>{{ skill.owner_username || '-' }}</code>
+            <small>{{ skill.is_deleted ? `删除时间 ${formatDate(skill.deleted_at)}` : '当前状态正常' }}</small>
           </div>
           <CommandSnippet label="Skill 安装" :command="skill.install_command" />
         </div>

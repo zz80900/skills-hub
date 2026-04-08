@@ -1,115 +1,67 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import DbSession, get_current_admin
-from app.core.config import get_settings
-from app.core.security import create_access_token
-from app.schemas.auth import LoginRequest, LoginResponse, MessageResponse
-from app.schemas.skill import AdminSkillDetail, AdminSkillSummary
-from app.services import nexus as nexus_service
-from app.services.skill_service import (
-    create_skill,
-    get_skill_by_name,
-    get_skill_versions,
-    search_skills,
-    soft_delete_skill,
-    to_admin_skill_detail,
-    to_skill_summary,
-    update_skill,
-    validate_skill_name,
-    validate_zip_file,
-)
+from app.api.deps import DbSession, require_admin
+from app.models.user import User
+from app.schemas.user import UserCreateRequest, UserPasswordResetRequest, UserSummary, UserUpdateRequest
+from app.services.user_service import create_user, get_user_by_id, list_users, reset_user_password, to_user_summary, update_user
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
-@router.post("/login", response_model=LoginResponse)
-def login(payload: LoginRequest):
-    settings = get_settings()
-    if payload.username != settings.admin_username or payload.password != settings.admin_password:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
-    return LoginResponse(access_token=create_access_token(settings.admin_username))
+@router.get("/users", response_model=list[UserSummary])
+def list_admin_users(session: DbSession, _: User = Depends(require_admin)):
+    return [UserSummary.model_validate(to_user_summary(user)) for user in list_users(session)]
 
 
-@router.post("/logout", response_model=MessageResponse)
-def logout(_: str = Depends(get_current_admin)):
-    return MessageResponse(message="已退出登录")
-
-
-@router.get("/skills", response_model=list[AdminSkillSummary])
-def list_admin_skills(session: DbSession, _: str = Depends(get_current_admin), q: str | None = None):
-    return [AdminSkillSummary.model_validate(to_skill_summary(skill)) for skill in search_skills(session, q)]
-
-
-@router.get("/skills/{name}", response_model=AdminSkillDetail)
-def get_admin_skill(name: str, session: DbSession, _: str = Depends(get_current_admin)):
-    skill = get_skill_by_name(session, name)
-    if skill is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
-    versions = get_skill_versions(session, skill)
-    return AdminSkillDetail.model_validate(to_admin_skill_detail(skill, versions))
-
-
-@router.post("/skills", response_model=AdminSkillDetail, status_code=status.HTTP_201_CREATED)
-async def create_admin_skill(
+@router.post("/users", response_model=UserSummary, status_code=status.HTTP_201_CREATED)
+def create_admin_user(
+    payload: UserCreateRequest,
     session: DbSession,
-    _: str = Depends(get_current_admin),
-    name: str = Form(...),
-    description_markdown: str = Form(""),
-    contributor: str | None = Form(default=None),
-    zip_file: UploadFile = File(...),
+    _: User = Depends(require_admin),
 ):
-    validated_name = validate_skill_name(name)
-    if get_skill_by_name(session, validated_name) is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Skill 已存在")
-
-    zip_content = await validate_zip_file(zip_file)
-    package_url = nexus_service.upload_skill_zip(validated_name, zip_content)
-
     try:
-        skill = create_skill(session, validated_name, description_markdown, package_url, contributor)
+        user = create_user(session, payload.username, payload.password, payload.role, payload.is_active)
     except IntegrityError as exc:
         session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Skill 已存在") from exc
-    versions = get_skill_versions(session, skill)
-    return AdminSkillDetail.model_validate(to_admin_skill_detail(skill, versions))
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已存在") from exc
+    return UserSummary.model_validate(to_user_summary(user))
 
 
-@router.put("/skills/{name}", response_model=AdminSkillDetail)
-async def update_admin_skill(
-    name: str,
+@router.put("/users/{user_id}", response_model=UserSummary)
+def update_admin_user(
+    user_id: int,
+    payload: UserUpdateRequest,
     session: DbSession,
-    _: str = Depends(get_current_admin),
-    description_markdown: str = Form(""),
-    contributor: str | None = Form(default=None),
-    contributor_submitted: bool = Form(default=False),
-    zip_file: UploadFile | None = File(default=None),
+    _: User = Depends(require_admin),
 ):
-    validated_name = validate_skill_name(name)
-    skill = get_skill_by_name(session, validated_name)
-    if skill is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
-
-    package_url: str | None = None
-    if zip_file is not None and zip_file.filename:
-        zip_content = await validate_zip_file(zip_file)
-        package_url = nexus_service.upload_skill_zip(validated_name, zip_content)
-
-    if contributor_submitted:
-        next_contributor = contributor if contributor is not None else ""
-        skill = update_skill(session, skill, description_markdown, package_url, next_contributor)
-    else:
-        skill = update_skill(session, skill, description_markdown, package_url)
-    versions = get_skill_versions(session, skill)
-    return AdminSkillDetail.model_validate(to_admin_skill_detail(skill, versions))
+    user = get_user_by_id(session, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    try:
+        user = update_user(
+            session,
+            user,
+            username=payload.username,
+            role_name=payload.role,
+            is_active=payload.is_active,
+        )
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已存在") from exc
+    return UserSummary.model_validate(to_user_summary(user))
 
 
-@router.delete("/skills/{name}", response_model=MessageResponse)
-def delete_admin_skill(name: str, session: DbSession, _: str = Depends(get_current_admin)):
-    validated_name = validate_skill_name(name)
-    skill = get_skill_by_name(session, validated_name)
-    if skill is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
-    soft_delete_skill(session, skill)
-    return MessageResponse(message="Skill 已删除")
+@router.put("/users/{user_id}/password", response_model=UserSummary)
+def reset_admin_user_password(
+    user_id: int,
+    payload: UserPasswordResetRequest,
+    session: DbSession,
+    _: User = Depends(require_admin),
+):
+    user = get_user_by_id(session, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    user = reset_user_password(session, user, payload.password)
+    return UserSummary.model_validate(to_user_summary(user))

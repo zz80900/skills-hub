@@ -3,15 +3,15 @@ import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
-import { login, setToken } from '../../services/api'
+import { getWorkspaceRoute, login, setSession } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
 const submitting = ref(false)
 const error = ref('')
 const form = reactive({
-  username: 'admin',
-  password: 'admin',
+  username: '',
+  password: '',
 })
 
 async function handleSubmit() {
@@ -19,8 +19,8 @@ async function handleSubmit() {
   error.value = ''
   try {
     const payload = await login(form)
-    setToken(payload.access_token)
-    await router.push(route.query.redirect || '/admin')
+    setSession(payload.access_token, payload.user)
+    await router.push(typeof route.query.redirect === 'string' ? route.query.redirect : getWorkspaceRoute())
   } catch (err) {
     error.value = err.message
   } finally {
@@ -35,9 +35,9 @@ async function handleSubmit() {
     <main class="page-content page-content--narrow">
       <section class="admin-panel">
         <div class="admin-panel__heading">
-          <p class="eyebrow">管理后台</p>
-          <h1>管理员登录</h1>
-          <p>默认账号密码为 <code>admin / admin</code>，建议上线前通过环境变量覆盖。</p>
+          <p class="eyebrow">登录</p>
+          <h1>进入 Skill 工作台</h1>
+          <p>管理员可查看全部 Skill 和用户列表，普通用户仅可管理自己上传的 Skill。</p>
         </div>
 
         <form class="form-card" @submit.prevent="handleSubmit">
@@ -56,11 +56,10 @@ async function handleSubmit() {
           </label>
           <p v-if="error" class="feedback feedback--error">{{ error }}</p>
           <button class="button" :disabled="submitting" type="submit">
-            {{ submitting ? '登录中...' : '登录后台' }}
+            {{ submitting ? '登录中...' : '登录' }}
           </button>
         </form>
       </section>
     </main>
   </div>
 </template>
-

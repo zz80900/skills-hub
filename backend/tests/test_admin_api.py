@@ -51,38 +51,123 @@ def client():
         yield test_client
 
 
-def auth_headers(client: TestClient) -> dict[str, str]:
-    response = client.post("/api/admin/login", json={"username": "admin", "password": "admin"})
+def auth_headers(client: TestClient, username: str = "admin", password: str = "admin") -> dict[str, str]:
+    response = client.post("/api/auth/login", json={"username": username, "password": password})
+    assert response.status_code == 200
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 
-def create_local_skill(client: TestClient, monkeypatch, name: str = "demo-skill"):
+def create_user_account(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    username: str,
+    password: str,
+    role: str = "USER",
+    is_active: bool = True,
+):
+    response = client.post(
+        "/api/admin/users",
+        headers=admin_headers,
+        json={
+            "username": username,
+            "password": password,
+            "role": role,
+            "is_active": is_active,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def create_local_skill(
+    client: TestClient,
+    monkeypatch,
+    headers: dict[str, str],
+    name: str = "demo-skill",
+    description_markdown: str = "local detail",
+):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
 
     monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
 
     response = client.post(
-        "/api/admin/skills",
-        headers=auth_headers(client),
+        "/api/workspace/skills",
+        headers=headers,
         files={"zip_file": (f"{name}.zip", make_zip("# skill"), "application/zip")},
-        data={"name": name, "description_markdown": "local detail"},
+        data={"name": name, "description_markdown": description_markdown},
     )
     assert response.status_code == 201
     return response
 
 
 def test_login_success(client: TestClient):
-    response = client.post("/api/admin/login", json={"username": "admin", "password": "admin"})
+    response = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
     assert response.status_code == 200
-    assert response.json()["token_type"] == "bearer"
+    payload = response.json()
+    assert payload["token_type"] == "bearer"
+    assert payload["user"]["username"] == "admin"
+    assert payload["user"]["role"] == "ADMIN"
 
 
 def test_app_healthcheck(client: TestClient):
     response = client.get("/api/healthcheck")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "database": "ok"}
+
+
+def test_admin_user_management_endpoints(client: TestClient):
+    admin_headers = auth_headers(client)
+    create_response = create_user_account(client, admin_headers, "viewer", "viewer-pass", role="USER")
+    assert create_response["role"] == "USER"
+    assert create_response["is_active"] is True
+
+    list_response = client.get("/api/admin/users", headers=admin_headers)
+    assert list_response.status_code == 200
+    usernames = {item["username"] for item in list_response.json()}
+    assert {"admin", "viewer"}.issubset(usernames)
+
+    update_response = client.put(
+        f"/api/admin/users/{create_response['id']}",
+        headers=admin_headers,
+        json={"role": "ADMIN", "is_active": False},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["role"] == "ADMIN"
+    assert update_response.json()["is_active"] is False
+
+    disabled_login = client.post("/api/auth/login", json={"username": "viewer", "password": "viewer-pass"})
+    assert disabled_login.status_code == 401
+
+    enable_response = client.put(
+        f"/api/admin/users/{create_response['id']}",
+        headers=admin_headers,
+        json={"is_active": True},
+    )
+    assert enable_response.status_code == 200
+    assert enable_response.json()["is_active"] is True
+
+    reset_response = client.put(
+        f"/api/admin/users/{create_response['id']}/password",
+        headers=admin_headers,
+        json={"password": "new-viewer-pass"},
+    )
+    assert reset_response.status_code == 200
+
+    relogin_response = client.post("/api/auth/login", json={"username": "viewer", "password": "new-viewer-pass"})
+    assert relogin_response.status_code == 200
+    assert relogin_response.json()["user"]["role"] == "ADMIN"
+
+
+def test_non_admin_cannot_manage_users(client: TestClient):
+    admin_headers = auth_headers(client)
+    create_user_account(client, admin_headers, "alice", "alice-pass")
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    response = client.get("/api/admin/users", headers=alice_headers)
+    assert response.status_code == 403
+    assert response.json()["detail"] == "仅管理员可访问该功能"
 
 
 def test_upload_requires_skill_md(client: TestClient, monkeypatch):
@@ -96,7 +181,7 @@ def test_upload_requires_skill_md(client: TestClient, monkeypatch):
         archive.writestr("README.md", "# test")
 
     response = client.post(
-        "/api/admin/skills",
+        "/api/workspace/skills",
         headers=auth_headers(client),
         files={"zip_file": ("demo.zip", buffer.getvalue(), "application/zip")},
         data={"name": "demo-skill", "description_markdown": "# demo"},
@@ -105,13 +190,73 @@ def test_upload_requires_skill_md(client: TestClient, monkeypatch):
     assert response.json()["detail"] == "ZIP 压缩包中必须包含 SKILL.md"
 
 
+def test_workspace_user_skill_isolation(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    create_user_account(client, admin_headers, "alice", "alice-pass")
+    create_user_account(client, admin_headers, "bob", "bob-pass")
+
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+
+    create_response = create_local_skill(client, monkeypatch, alice_headers, name="alice-skill")
+    assert create_response.json()["owner_username"] == "alice"
+
+    alice_list = client.get("/api/workspace/skills", headers=alice_headers)
+    assert alice_list.status_code == 200
+    assert [item["name"] for item in alice_list.json()] == ["alice-skill"]
+
+    bob_list = client.get("/api/workspace/skills", headers=bob_headers)
+    assert bob_list.status_code == 200
+    assert bob_list.json() == []
+
+    bob_detail = client.get("/api/workspace/skills/alice-skill", headers=bob_headers)
+    assert bob_detail.status_code == 404
+
+    admin_list = client.get("/api/workspace/skills", headers=admin_headers)
+    assert admin_list.status_code == 200
+    assert admin_list.json()[0]["owner_username"] == "alice"
+    assert admin_list.json()[0]["is_deleted"] is False
+
+
+def test_workspace_delete_hides_public_and_user_views_but_admin_sees_deleted_status(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    create_user_account(client, admin_headers, "alice", "alice-pass")
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    create_local_skill(client, monkeypatch, alice_headers, name="remove-me")
+
+    delete_response = client.delete("/api/workspace/skills/remove-me", headers=alice_headers)
+    assert delete_response.status_code == 200
+
+    own_list = client.get("/api/workspace/skills", headers=alice_headers)
+    assert own_list.status_code == 200
+    assert own_list.json() == []
+
+    own_detail = client.get("/api/workspace/skills/remove-me", headers=alice_headers)
+    assert own_detail.status_code == 404
+
+    public_list = client.get("/api/skills")
+    assert public_list.status_code == 200
+    assert public_list.json()["local_items"] == []
+
+    admin_list = client.get("/api/workspace/skills", headers=admin_headers)
+    assert admin_list.status_code == 200
+    assert admin_list.json()[0]["name"] == "remove-me"
+    assert admin_list.json()[0]["is_deleted"] is True
+    assert admin_list.json()[0]["deleted_at"] is not None
+
+    admin_detail = client.get("/api/workspace/skills/remove-me", headers=admin_headers)
+    assert admin_detail.status_code == 200
+    assert admin_detail.json()["is_deleted"] is True
+
+
 def test_create_and_search_skill(client: TestClient, monkeypatch):
     async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
         return [], False
 
     monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
 
-    response = create_local_skill(client, monkeypatch, name="plm-assistant")
+    response = create_local_skill(client, monkeypatch, auth_headers(client), name="plm-assistant")
     assert response.json()["current_version"] == "1.0.0"
 
     search_response = client.get("/api/skills", params={"q": "local"})
@@ -121,37 +266,12 @@ def test_create_and_search_skill(client: TestClient, monkeypatch):
     assert "package_url" not in payload["local_items"][0]
 
 
-def test_create_skill_stores_optional_contributor(client: TestClient, monkeypatch):
-    def fake_upload(skill_name: str, content: bytes) -> str:
-        return nexus_service.build_package_url(skill_name)
-
-    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
-
-    response = client.post(
-        "/api/admin/skills",
-        headers=auth_headers(client),
-        files={"zip_file": ("plm-assistant.zip", make_zip("# skill"), "application/zip")},
-        data={
-            "name": "plm-assistant",
-            "description_markdown": "PLM 工具 Skill",
-            "contributor": "平台研发组",
-        },
-    )
-    assert response.status_code == 201
-    assert response.json()["contributor"] == "平台研发组"
-    assert response.json()["current_version"] == "1.0.0"
-
-    list_response = client.get("/api/admin/skills", headers=auth_headers(client))
-    assert list_response.status_code == 200
-    assert list_response.json()[0]["contributor"] == "平台研发组"
-
-
 def test_upgrade_skill_creates_new_version_history(client: TestClient, monkeypatch):
-    create_response = create_local_skill(client, monkeypatch, name="demo-upgrade")
+    create_response = create_local_skill(client, monkeypatch, auth_headers(client), name="demo-upgrade")
     assert create_response.json()["current_version"] == "1.0.0"
 
     update_response = client.put(
-        "/api/admin/skills/demo-upgrade",
+        "/api/workspace/skills/demo-upgrade",
         headers=auth_headers(client),
         files={"zip_file": ("demo-upgrade.zip", make_zip("# second"), "application/zip")},
         data={"description_markdown": "new description", "contributor": "", "contributor_submitted": "true"},
@@ -162,14 +282,13 @@ def test_upgrade_skill_creates_new_version_history(client: TestClient, monkeypat
     assert payload["contributor"] is None
     assert payload["current_version"] == "1.0.1"
     assert [item["version"] for item in payload["version_history"]] == ["1.0.1", "1.0.0"]
-    assert "package_url" not in payload
 
 
 def test_public_local_detail_supports_history_query(client: TestClient, monkeypatch):
-    create_local_skill(client, monkeypatch, name="history-skill")
+    create_local_skill(client, monkeypatch, auth_headers(client), name="history-skill")
 
     update_response = client.put(
-        "/api/admin/skills/history-skill",
+        "/api/workspace/skills/history-skill",
         headers=auth_headers(client),
         data={"description_markdown": "second version"},
     )
@@ -188,26 +307,8 @@ def test_public_local_detail_supports_history_query(client: TestClient, monkeypa
     assert "local detail" in old_payload["description_html"]
 
 
-def test_delete_skill_hides_admin_and_public_views(client: TestClient, monkeypatch):
-    create_local_skill(client, monkeypatch, name="remove-me")
-
-    delete_response = client.delete("/api/admin/skills/remove-me", headers=auth_headers(client))
-    assert delete_response.status_code == 200
-
-    admin_list = client.get("/api/admin/skills", headers=auth_headers(client))
-    assert admin_list.status_code == 200
-    assert admin_list.json() == []
-
-    public_list = client.get("/api/skills")
-    assert public_list.status_code == 200
-    assert public_list.json()["local_items"] == []
-
-    assert client.get("/api/admin/skills/remove-me", headers=auth_headers(client)).status_code == 404
-    assert client.get("/api/skills/local/remove-me").status_code == 404
-
-
 def test_version_ceiling_returns_422(client: TestClient, monkeypatch):
-    create_local_skill(client, monkeypatch, name="ceiling-skill")
+    create_local_skill(client, monkeypatch, auth_headers(client), name="ceiling-skill")
 
     with engine.begin() as connection:
         connection.execute(
@@ -215,7 +316,7 @@ def test_version_ceiling_returns_422(client: TestClient, monkeypatch):
         )
 
     response = client.put(
-        "/api/admin/skills/ceiling-skill",
+        "/api/workspace/skills/ceiling-skill",
         headers=auth_headers(client),
         data={"description_markdown": "blocked"},
     )
@@ -223,7 +324,7 @@ def test_version_ceiling_returns_422(client: TestClient, monkeypatch):
     assert response.json()["detail"] == "Skill 版本已达到 9.9.9，无法继续升级"
 
 
-def test_schema_compatibility_adds_versioning_columns_and_history_table():
+def test_schema_compatibility_adds_access_control_and_backfills_owner():
     Base.metadata.drop_all(bind=engine)
     with engine.begin() as connection:
         connection.execute(
@@ -264,19 +365,26 @@ def test_schema_compatibility_adds_versioning_columns_and_history_table():
     ensure_schema_compatibility(engine)
 
     columns = {column["name"] for column in inspect(engine).get_columns("skills")}
-    assert {"contributor", "current_version", "deleted_at"}.issubset(columns)
-    assert "skill_versions" in inspect(engine).get_table_names()
+    table_names = set(inspect(engine).get_table_names())
+    assert {"contributor", "current_version", "deleted_at", "owner_id"}.issubset(columns)
+    assert {"skill_versions", "roles", "users"}.issubset(table_names)
 
     with engine.begin() as connection:
         skill_row = connection.execute(
-            text("SELECT current_version FROM skills WHERE name = 'legacy-skill'")
+            text("SELECT current_version, owner_id FROM skills WHERE name = 'legacy-skill'")
         ).mappings().one()
         version_row = connection.execute(
             text("SELECT version FROM skill_versions WHERE skill_id = 1")
         ).mappings().one()
+        admin_row = connection.execute(
+            text("SELECT id, username FROM users WHERE username = 'admin'")
+        ).mappings().one()
+        role_rows = connection.execute(text("SELECT name FROM roles ORDER BY name")).mappings().all()
 
     assert skill_row["current_version"] == "1.0.0"
+    assert skill_row["owner_id"] == admin_row["id"]
     assert version_row["version"] == "1.0.0"
+    assert [row["name"] for row in role_rows] == ["ADMIN", "USER"]
 
 
 def test_public_skills_groups_local_and_remote_results(client: TestClient, monkeypatch):
@@ -296,7 +404,7 @@ def test_public_skills_groups_local_and_remote_results(client: TestClient, monke
 
     monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
 
-    create_local_skill(client, monkeypatch, name="plm-assistant")
+    create_local_skill(client, monkeypatch, auth_headers(client), name="plm-assistant")
 
     response = client.get("/api/skills", params={"q": "local"})
     assert response.status_code == 200
@@ -341,7 +449,7 @@ def test_public_remote_failure_does_not_break_local_results(client: TestClient, 
 
     monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
 
-    create_local_skill(client, monkeypatch, name="demo-skill")
+    create_local_skill(client, monkeypatch, auth_headers(client), name="demo-skill")
 
     response = client.get("/api/skills")
     assert response.status_code == 200

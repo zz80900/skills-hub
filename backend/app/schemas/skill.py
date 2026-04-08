@@ -50,20 +50,27 @@ class AdminSkillVersionSummary(BaseModel):
     created_at: datetime
 
 
-class AdminSkillSummary(BaseModel):
+class ManagedSkillSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str
+    owner_username: str | None = None
     current_version: str
     contributor: str | None = None
     description_html: str
     install_command: str
+    is_deleted: bool = False
+    deleted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
 
-class AdminSkillDetail(AdminSkillSummary):
+class ManagedSkillDetail(ManagedSkillSummary):
     model_config = ConfigDict(from_attributes=True)
 
     description_markdown: str
     version_history: list[AdminSkillVersionSummary]
+
+
+AdminSkillSummary = ManagedSkillSummary
+AdminSkillDetail = ManagedSkillDetail
