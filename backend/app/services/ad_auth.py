@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
 import os
 import secrets
 import shlex
@@ -145,6 +146,7 @@ class ActiveDirectoryAuthenticator:
             raise ActiveDirectoryUnavailableError("missing python dependency: ldap3") from exc
 
         bind_password = self._settings.ad_ldap_bind_password
+        ldap_timeout_seconds = normalize_ldap_timeout_seconds(self._settings.ad_ldap_timeout_seconds)
         bind_candidates = build_ldap_service_bind_principals(
             ldap_bind_username=self._settings.ad_ldap_bind_username,
             ldap_bind_principal=self._settings.ad_ldap_bind_principal,
@@ -157,7 +159,7 @@ class ActiveDirectoryAuthenticator:
         for server_kwargs in build_ldap_server_kwargs_candidates(self._settings.ad_ldap_url):
             server = ldap3.Server(
                 get_info=ldap3.NONE,
-                connect_timeout=self._settings.ad_ldap_timeout_seconds,
+                connect_timeout=ldap_timeout_seconds,
                 **server_kwargs,
             )
             for bind_name in bind_candidates:
@@ -168,7 +170,7 @@ class ActiveDirectoryAuthenticator:
                         password=bind_password,
                         authentication=ldap3.SIMPLE,
                         auto_bind=True,
-                        receive_timeout=self._settings.ad_ldap_timeout_seconds,
+                        receive_timeout=ldap_timeout_seconds,
                         read_only=True,
                     )
                     break
@@ -293,6 +295,13 @@ def build_ldap_server_kwargs_candidates(ldap_url: str) -> list[dict[str, Any]]:
     if "://" in raw_value:
         candidates.append({"host": raw_value})
     return dedupe_ldap_server_kwargs(candidates)
+
+
+def normalize_ldap_timeout_seconds(timeout_seconds: float | int) -> int:
+    value = float(timeout_seconds)
+    if value <= 0:
+        raise ActiveDirectoryUnavailableError(f"invalid ldap timeout: {timeout_seconds}")
+    return max(1, math.ceil(value))
 
 
 def parse_ldap_server_url(ldap_url: str) -> tuple[str, int | None, bool]:

@@ -9,6 +9,7 @@ from app.services.ad_auth import (
     ActiveDirectoryUnavailableError,
     build_ldap_server_kwargs_candidates,
     create_kerberos_temp_dir,
+    normalize_ldap_timeout_seconds,
     parse_ldap_server_url,
 )
 
@@ -45,6 +46,20 @@ def test_build_ldap_server_kwargs_candidates_keeps_bare_host_single():
     assert build_ldap_server_kwargs_candidates("10.18.8.16:389") == [
         {"host": "10.18.8.16", "port": 389, "use_ssl": False},
     ]
+
+
+def test_normalize_ldap_timeout_seconds_rounds_up_to_int():
+    assert normalize_ldap_timeout_seconds(15.0) == 15
+    assert normalize_ldap_timeout_seconds(15.1) == 16
+
+
+def test_normalize_ldap_timeout_seconds_rejects_non_positive():
+    try:
+        normalize_ldap_timeout_seconds(0)
+    except ActiveDirectoryUnavailableError as exc:
+        assert str(exc) == "invalid ldap timeout: 0"
+    else:
+        raise AssertionError("expected ActiveDirectoryUnavailableError")
 
 
 def test_create_kerberos_temp_dir_is_writable():
