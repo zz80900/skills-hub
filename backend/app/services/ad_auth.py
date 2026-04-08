@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import secrets
 import shlex
@@ -13,6 +14,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class ActiveDirectoryError(Exception):
@@ -140,14 +144,6 @@ class ActiveDirectoryAuthenticator:
         except ImportError as exc:
             raise ActiveDirectoryUnavailableError("missing python dependency: ldap3") from exc
 
-        ldap_host, ldap_port, ldap_use_ssl = parse_ldap_server_url(self._settings.ad_ldap_url)
-        server = ldap3.Server(
-            ldap_host,
-            port=ldap_port,
-            use_ssl=ldap_use_ssl,
-            get_info=ldap3.NONE,
-            connect_timeout=self._settings.ad_ldap_timeout_seconds,
-        )
         bind_password = self._settings.ad_ldap_bind_password
         bind_candidates = build_ldap_service_bind_principals(
             ldap_bind_username=self._settings.ad_ldap_bind_username,
@@ -158,20 +154,34 @@ class ActiveDirectoryAuthenticator:
 
         last_error: Exception | None = None
         connection = None
-        for bind_name in bind_candidates:
-            try:
-                connection = ldap3.Connection(
-                    server,
-                    user=bind_name,
-                    password=bind_password,
-                    authentication=ldap3.SIMPLE,
-                    auto_bind=True,
-                    receive_timeout=self._settings.ad_ldap_timeout_seconds,
-                    read_only=True,
-                )
+        for server_kwargs in build_ldap_server_kwargs_candidates(self._settings.ad_ldap_url):
+            server = ldap3.Server(
+                get_info=ldap3.NONE,
+                connect_timeout=self._settings.ad_ldap_timeout_seconds,
+                **server_kwargs,
+            )
+            for bind_name in bind_candidates:
+                try:
+                    connection = ldap3.Connection(
+                        server,
+                        user=bind_name,
+                        password=bind_password,
+                        authentication=ldap3.SIMPLE,
+                        auto_bind=True,
+                        receive_timeout=self._settings.ad_ldap_timeout_seconds,
+                        read_only=True,
+                    )
+                    break
+                except Exception as exc:  # pragma: no cover - real LDAP errors depend on environment
+                    last_error = exc
+                    logger.warning(
+                        "LDAP bind failed for server=%s bind=%s: %s",
+                        describe_ldap_server_kwargs(server_kwargs),
+                        bind_name,
+                        exc,
+                    )
+            if connection is not None:
                 break
-            except Exception as exc:  # pragma: no cover - real LDAP errors depend on environment
-                last_error = exc
 
         if connection is None:
             raise classify_ldap_failure(last_error)
@@ -198,6 +208,12 @@ class ActiveDirectoryAuthenticator:
                     )
                 except Exception as exc:  # pragma: no cover - real LDAP errors depend on environment
                     last_lookup_error = exc
+                    logger.warning(
+                        "LDAP search failed for base=%s principal=%s: %s",
+                        search_base,
+                        principal,
+                        exc,
+                    )
                     continue
                 if connection.entries:
                     entry = connection.entries[0]
@@ -265,6 +281,18 @@ def build_search_bases(*, base_dn: str, realm: str, domain_root_dn: str) -> list
     normalized_base_dn = normalize_base_dn(base_dn, realm)
     fallback_root = (domain_root_dn or "").strip() or build_domain_root_dn(realm)
     return dedupe_strings([normalized_base_dn, fallback_root])
+
+
+def build_ldap_server_kwargs_candidates(ldap_url: str) -> list[dict[str, Any]]:
+    host, port, use_ssl = parse_ldap_server_url(ldap_url)
+    candidates = [
+        {"host": host, "port": port, "use_ssl": use_ssl},
+    ]
+
+    raw_value = (ldap_url or "").strip()
+    if "://" in raw_value:
+        candidates.append({"host": raw_value})
+    return dedupe_ldap_server_kwargs(candidates)
 
 
 def parse_ldap_server_url(ldap_url: str) -> tuple[str, int | None, bool]:
@@ -358,6 +386,23 @@ def dedupe_strings(values: list[str]) -> list[str]:
         seen.add(lookup_key)
         result.append(normalized)
     return result
+
+
+def dedupe_ldap_server_kwargs(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    for value in values:
+        normalized = {key: value[key] for key in sorted(value)}
+        lookup_key = tuple((key, str(normalized[key])) for key in normalized)
+        if lookup_key in seen:
+            continue
+        seen.add(lookup_key)
+        result.append(normalized)
+    return result
+
+
+def describe_ldap_server_kwargs(server_kwargs: dict[str, Any]) -> str:
+    return ",".join(f"{key}={server_kwargs[key]}" for key in sorted(server_kwargs))
 
 
 def create_kerberos_temp_dir(parent_dir: Path | None = None) -> Path:
