@@ -66,13 +66,28 @@ if frontend_dist.exists():
     assets_dir = frontend_dist / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend-static")
+
+
+def _frontend_response(full_path: str = ""):
+    if full_path.startswith("api/") or full_path == "health":
+        raise HTTPException(status_code=404, detail="Not Found")
+    requested_file = (frontend_dist / full_path).resolve()
+    try:
+        requested_file.relative_to(frontend_dist.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Not Found") from exc
+    if requested_file.is_file():
+        return FileResponse(requested_file)
+    if frontend_index.exists():
+        return FileResponse(frontend_index)
+    raise HTTPException(status_code=404, detail="Frontend build not found")
+
+
+@app.get("/", include_in_schema=False)
+def frontend_root():
+    return _frontend_response()
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
 def frontend_app(full_path: str):
-    if full_path.startswith("api/") or full_path == "health":
-        raise HTTPException(status_code=404, detail="Not Found")
-    if frontend_index.exists():
-        return FileResponse(frontend_index)
-    raise HTTPException(status_code=404, detail="Frontend build not found")
+    return _frontend_response(full_path)
