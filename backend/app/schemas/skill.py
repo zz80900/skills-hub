@@ -15,6 +15,7 @@ class PublicSkillSummary(BaseModel):
     installs: int | None = None
     version: str | None = None
     contributor: str | None = None
+    updated_at: datetime | None = None
 
 
 class SkillListResponse(BaseModel):
@@ -59,6 +60,7 @@ class AdminSkillVersionSummary(BaseModel):
 class ManagedSkillSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: int
     name: str
     owner_username: str | None = None
     current_version: str

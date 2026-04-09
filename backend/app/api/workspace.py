@@ -54,7 +54,7 @@ async def create_workspace_skill(
     zip_file: UploadFile = File(...),
 ):
     validated_name = validate_skill_name(name)
-    if get_skill_by_name(session, validated_name, include_deleted=True) is not None:
+    if get_skill_by_name(session, validated_name) is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Skill 已存在")
 
     zip_content = await validate_zip_file(zip_file)

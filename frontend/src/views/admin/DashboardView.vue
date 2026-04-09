@@ -167,7 +167,7 @@ function clearSearch() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="skill in skills" :key="skill.name" :class="{ 'admin-table__row--deleted': skill.is_deleted }">
+            <tr v-for="skill in skills" :key="skill.id" :class="{ 'admin-table__row--deleted': skill.is_deleted }">
               <td>
                 <router-link class="admin-table__title" :to="`/workspace/skills/${skill.name}`">
                   {{ skill.name }}

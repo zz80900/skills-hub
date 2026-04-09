@@ -134,11 +134,21 @@ def search_public_skills(session: Session, query: str | None = None) -> list[Ski
     return list(session.scalars(statement))
 
 
+def _skill_name_resolution_order():
+    return (
+        case((Skill.deleted_at.is_(None), 0), else_=1),
+        Skill.deleted_at.desc(),
+        Skill.id.desc(),
+    )
+
+
 def get_skill_by_name(session: Session, name: str, include_deleted: bool = False) -> Skill | None:
     statement = select(Skill).where(Skill.name == name)
     if not include_deleted:
-        statement = statement.where(Skill.deleted_at.is_(None))
-    return session.scalar(statement)
+        statement = statement.where(Skill.deleted_at.is_(None)).order_by(Skill.id.desc())
+    else:
+        statement = statement.order_by(*_skill_name_resolution_order())
+    return session.scalars(statement).first()
 
 
 def get_skill_versions(session: Session, skill: Skill) -> list[SkillVersion]:
@@ -164,6 +174,7 @@ def search_workspace_skills(session: Session, actor: User, query: str | None = N
     if actor.role.name == ROLE_ADMIN:
         statement = statement.order_by(
             case((Skill.deleted_at.is_(None), 0), else_=1),
+            Skill.deleted_at.desc(),
             Skill.updated_at.desc(),
             Skill.id.desc(),
         )
@@ -179,8 +190,10 @@ def search_workspace_skills(session: Session, actor: User, query: str | None = N
 def get_workspace_skill_by_name(session: Session, name: str, actor: User) -> Skill | None:
     statement = select(Skill).where(Skill.name == name)
     if actor.role.name != ROLE_ADMIN:
-        statement = statement.where(Skill.owner_id == actor.id, Skill.deleted_at.is_(None))
-    return session.scalar(statement)
+        statement = statement.where(Skill.owner_id == actor.id, Skill.deleted_at.is_(None)).order_by(Skill.id.desc())
+    else:
+        statement = statement.order_by(*_skill_name_resolution_order())
+    return session.scalars(statement).first()
 
 
 def create_skill(
@@ -258,6 +271,7 @@ def soft_delete_skill(session: Session, skill: Skill) -> None:
 
 def to_skill_summary(skill: Skill) -> dict[str, Any]:
     return {
+        "id": skill.id,
         "name": skill.name,
         "owner_username": skill.owner.username,
         "current_version": skill.current_version,

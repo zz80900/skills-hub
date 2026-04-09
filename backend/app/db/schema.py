@@ -1,3 +1,5 @@
+import re
+
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -39,6 +41,7 @@ def ensure_schema_compatibility(engine: Engine) -> None:
     _ensure_skill_columns(engine, inspector)
     _backfill_skill_versions(engine)
     _backfill_skill_owners(engine, default_admin_id)
+    _ensure_skill_name_uniqueness_policy(engine)
 
 
 def _ensure_skill_columns(engine: Engine, inspector) -> None:
@@ -209,4 +212,142 @@ def _backfill_skill_owners(engine: Engine, default_admin_id: int) -> None:
                 """
             ),
             {"owner_id": default_admin_id},
+        )
+
+
+def _ensure_skill_name_uniqueness_policy(engine: Engine) -> None:
+    dialect_name = engine.dialect.name
+    if dialect_name == "sqlite":
+        _ensure_sqlite_skill_name_uniqueness_policy(engine)
+        return
+
+    if dialect_name == "postgresql":
+        _ensure_postgresql_skill_name_uniqueness_policy(engine)
+
+
+def _ensure_sqlite_skill_name_uniqueness_policy(engine: Engine) -> None:
+    table_sql = _get_sqlite_table_sql(engine, "skills")
+    if table_sql and _sqlite_table_has_global_unique_name(table_sql):
+        _rebuild_sqlite_skills_table_without_global_unique_name(engine)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_skills_active_name
+                ON skills (name)
+                WHERE deleted_at IS NULL
+                """
+            )
+        )
+
+
+def _get_sqlite_table_sql(engine: Engine, table_name: str) -> str | None:
+    with engine.begin() as connection:
+        return connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :table_name"),
+            {"table_name": table_name},
+        ).scalar()
+
+
+def _sqlite_table_has_global_unique_name(table_sql: str) -> bool:
+    normalized_sql = re.sub(r"\s+", " ", table_sql.upper())
+    return bool(
+        re.search(r"\bNAME\b.*?\bUNIQUE\b", normalized_sql)
+        or re.search(r"\bUNIQUE\s*\(\s*NAME\s*\)", normalized_sql)
+    )
+
+
+def _rebuild_sqlite_skills_table_without_global_unique_name(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=OFF"))
+        try:
+            connection.execute(text("DROP TABLE IF EXISTS skills__migration"))
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE skills__migration (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        name VARCHAR(64) NOT NULL,
+                        owner_id INTEGER NOT NULL,
+                        description_markdown TEXT NOT NULL DEFAULT '',
+                        description_html TEXT NOT NULL DEFAULT '',
+                        contributor VARCHAR(128),
+                        package_url VARCHAR(512) NOT NULL,
+                        current_version VARCHAR(16) NOT NULL DEFAULT '1.0.0',
+                        deleted_at TIMESTAMP,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(owner_id) REFERENCES users (id)
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO skills__migration (
+                        id,
+                        name,
+                        owner_id,
+                        description_markdown,
+                        description_html,
+                        contributor,
+                        package_url,
+                        current_version,
+                        deleted_at,
+                        created_at,
+                        updated_at
+                    )
+                    SELECT
+                        id,
+                        name,
+                        owner_id,
+                        description_markdown,
+                        description_html,
+                        contributor,
+                        package_url,
+                        current_version,
+                        deleted_at,
+                        created_at,
+                        updated_at
+                    FROM skills
+                    """
+                )
+            )
+            connection.execute(text("DROP TABLE skills"))
+            connection.execute(text("ALTER TABLE skills__migration RENAME TO skills"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_name ON skills (name)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_owner_id ON skills (owner_id)"))
+        finally:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+
+
+def _ensure_postgresql_skill_name_uniqueness_policy(engine: Engine) -> None:
+    with engine.begin() as connection:
+        constraint_rows = connection.execute(
+            text(
+                """
+                SELECT con.conname
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_namespace nsp ON nsp.oid = con.connamespace
+                WHERE rel.relname = 'skills'
+                  AND nsp.nspname = current_schema()
+                  AND con.contype = 'u'
+                  AND pg_get_constraintdef(con.oid) ILIKE '%(name)%'
+                """
+            )
+        ).scalars()
+        for constraint_name in constraint_rows:
+            connection.execute(text(f'ALTER TABLE skills DROP CONSTRAINT "{constraint_name}"'))
+
+        connection.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_skills_active_name
+                ON skills (name)
+                WHERE deleted_at IS NULL
+                """
+            )
         )

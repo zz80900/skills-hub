@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
@@ -401,6 +402,156 @@ def test_workspace_delete_hides_public_and_user_views_but_admin_sees_deleted_sta
     assert admin_detail.json()["is_deleted"] is True
 
 
+def test_workspace_skill_can_be_recreated_after_delete(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    create_user_account(client, admin_headers, "alice", "alice-pass")
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    first_payload = create_local_skill(
+        client,
+        monkeypatch,
+        alice_headers,
+        name="repeat-skill",
+        description_markdown="first generation",
+    ).json()
+    first_delete = client.delete("/api/workspace/skills/repeat-skill", headers=alice_headers)
+    assert first_delete.status_code == 200
+
+    second_response = create_local_skill(
+        client,
+        monkeypatch,
+        alice_headers,
+        name="repeat-skill",
+        description_markdown="second generation",
+    )
+    assert second_response.status_code == 201
+    second_payload = second_response.json()
+    assert second_payload["id"] != first_payload["id"]
+    assert second_payload["is_deleted"] is False
+    assert second_payload["description_markdown"] == "second generation"
+
+    admin_list = client.get("/api/workspace/skills", headers=admin_headers)
+    assert admin_list.status_code == 200
+    repeat_items = [item for item in admin_list.json() if item["name"] == "repeat-skill"]
+    assert len(repeat_items) == 2
+    assert repeat_items[0]["id"] == second_payload["id"]
+    assert repeat_items[0]["is_deleted"] is False
+    assert repeat_items[1]["id"] == first_payload["id"]
+    assert repeat_items[1]["is_deleted"] is True
+    assert repeat_items[1]["deleted_at"] is not None
+
+
+def test_workspace_skill_keeps_multiple_deleted_histories_and_allows_recreate(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    create_user_account(client, admin_headers, "alice", "alice-pass")
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    for description in ("first deleted", "second deleted"):
+        create_local_skill(
+            client,
+            monkeypatch,
+            alice_headers,
+            name="history-rebuild-skill",
+            description_markdown=description,
+        )
+        delete_response = client.delete("/api/workspace/skills/history-rebuild-skill", headers=alice_headers)
+        assert delete_response.status_code == 200
+
+    recreate_response = create_local_skill(
+        client,
+        monkeypatch,
+        alice_headers,
+        name="history-rebuild-skill",
+        description_markdown="third active",
+    )
+    assert recreate_response.status_code == 201
+    recreate_payload = recreate_response.json()
+    assert recreate_payload["is_deleted"] is False
+
+    admin_list = client.get("/api/workspace/skills", headers=admin_headers)
+    assert admin_list.status_code == 200
+    items = [item for item in admin_list.json() if item["name"] == "history-rebuild-skill"]
+    assert len(items) == 3
+    assert sum(1 for item in items if item["is_deleted"]) == 2
+    assert sum(1 for item in items if not item["is_deleted"]) == 1
+    assert all(item["id"] for item in items)
+
+    public_list = client.get("/api/skills")
+    assert public_list.status_code == 200
+    public_items = [item for item in public_list.json()["local_items"] if item["name"] == "history-rebuild-skill"]
+    assert len(public_items) == 1
+    assert public_items[0]["version"] == "1.0.0"
+
+    own_list = client.get("/api/workspace/skills", headers=alice_headers)
+    assert own_list.status_code == 200
+    own_items = [item for item in own_list.json() if item["name"] == "history-rebuild-skill"]
+    assert len(own_items) == 1
+    assert own_items[0]["id"] == recreate_payload["id"]
+
+
+def test_workspace_create_skill_returns_409_when_active_duplicate_exists(client: TestClient, monkeypatch):
+    headers = auth_headers(client)
+    create_local_skill(client, monkeypatch, headers, name="duplicate-skill")
+
+    response = client.post(
+        "/api/workspace/skills",
+        headers=headers,
+        files={"zip_file": ("duplicate-skill.zip", make_zip("# duplicate"), "application/zip")},
+        data={"name": "duplicate-skill", "description_markdown": "duplicate"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Skill 已存在"
+
+
+def test_admin_workspace_skill_detail_prefers_active_then_latest_deleted(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    create_user_account(client, admin_headers, "alice", "alice-pass")
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    first_payload = create_local_skill(
+        client,
+        monkeypatch,
+        alice_headers,
+        name="resolver-skill",
+        description_markdown="first deleted",
+    ).json()
+    first_delete = client.delete("/api/workspace/skills/resolver-skill", headers=alice_headers)
+    assert first_delete.status_code == 200
+
+    second_payload = create_local_skill(
+        client,
+        monkeypatch,
+        alice_headers,
+        name="resolver-skill",
+        description_markdown="second deleted",
+    ).json()
+    second_delete = client.delete("/api/workspace/skills/resolver-skill", headers=alice_headers)
+    assert second_delete.status_code == 200
+
+    deleted_detail = client.get("/api/workspace/skills/resolver-skill", headers=admin_headers)
+    assert deleted_detail.status_code == 200
+    deleted_payload = deleted_detail.json()
+    assert deleted_payload["id"] == second_payload["id"]
+    assert deleted_payload["is_deleted"] is True
+    assert deleted_payload["description_markdown"] == "second deleted"
+
+    third_payload = create_local_skill(
+        client,
+        monkeypatch,
+        alice_headers,
+        name="resolver-skill",
+        description_markdown="third active",
+    ).json()
+
+    active_detail = client.get("/api/workspace/skills/resolver-skill", headers=admin_headers)
+    assert active_detail.status_code == 200
+    active_payload = active_detail.json()
+    assert active_payload["id"] == third_payload["id"]
+    assert active_payload["is_deleted"] is False
+    assert active_payload["description_markdown"] == "third active"
+    assert active_payload["id"] not in {first_payload["id"], second_payload["id"]}
+
+
 def test_create_and_search_skill(client: TestClient, monkeypatch):
     async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
         return [], False
@@ -539,6 +690,100 @@ def test_schema_compatibility_adds_access_control_and_backfills_owner():
     assert admin_row["source"] == "LOCAL"
     assert version_row["version"] == "1.0.0"
     assert [row["name"] for row in role_rows] == ["ADMIN", "USER"]
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE skills
+                SET deleted_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO skills (
+                    id,
+                    name,
+                    owner_id,
+                    description_markdown,
+                    description_html,
+                    contributor,
+                    package_url,
+                    current_version,
+                    deleted_at
+                ) VALUES (
+                    2,
+                    'legacy-skill',
+                    :owner_id,
+                    'deleted history',
+                    '<p>deleted history</p>',
+                    'admin',
+                    'http://example.invalid/legacy-skill-history.zip',
+                    '1.0.0',
+                    CURRENT_TIMESTAMP
+                )
+                """
+            ),
+            {"owner_id": admin_row["id"]},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO skills (
+                    id,
+                    name,
+                    owner_id,
+                    description_markdown,
+                    description_html,
+                    contributor,
+                    package_url,
+                    current_version
+                ) VALUES (
+                    3,
+                    'legacy-skill',
+                    :owner_id,
+                    'active legacy skill',
+                    '<p>active legacy skill</p>',
+                    'admin',
+                    'http://example.invalid/legacy-skill-active.zip',
+                    '1.0.0'
+                )
+                """
+            ),
+            {"owner_id": admin_row["id"]},
+        )
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO skills (
+                        id,
+                        name,
+                        owner_id,
+                        description_markdown,
+                        description_html,
+                        contributor,
+                        package_url,
+                        current_version
+                    ) VALUES (
+                        4,
+                        'legacy-skill',
+                        :owner_id,
+                        'duplicate active legacy skill',
+                        '<p>duplicate active legacy skill</p>',
+                        'admin',
+                        'http://example.invalid/legacy-skill-active-duplicate.zip',
+                        '1.0.0'
+                    )
+                    """
+                ),
+                {"owner_id": admin_row["id"]},
+            )
 
 
 def test_public_skills_groups_local_and_remote_results(client: TestClient, monkeypatch):
