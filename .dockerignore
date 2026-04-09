@@ -15,10 +15,10 @@ backend/tests/__pycache__/
 backend/app/__pycache__/
 frontend/dist
 frontend/.npm-cache
+frontend/.npm-cache-public
 frontend/.vite
 **/__pycache__/
 **/*.pyc
 *.log
 *.tmp
 Thumbs.db
-

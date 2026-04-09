@@ -3,7 +3,8 @@ FROM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
-COPY frontend/node_modules/ ./node_modules/
+COPY frontend/.npmrc ./
+RUN npm ci
 COPY frontend/ ./
 
 RUN npm run build
