@@ -103,7 +103,11 @@ async function handleSubmit() {
     resetForm()
     await loadUsers()
   } catch (err) {
-    error.value = err.message
+    if (err.message && err.message.includes('挑战')) {
+      error.value = '安全验证失败，请刷新页面后重试'
+    } else {
+      error.value = err.message
+    }
   } finally {
     submitting.value = false
   }
@@ -125,7 +129,11 @@ async function handlePasswordReset(user) {
     await resetUserPassword(user.id, nextPassword)
     await loadUsers()
   } catch (err) {
-    error.value = err.message
+    if (err.message && err.message.includes('挑战')) {
+      error.value = '安全验证失败，请刷新页面后重试'
+    } else {
+      error.value = err.message
+    }
   } finally {
     resettingId.value = null
   }
