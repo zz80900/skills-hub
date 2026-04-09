@@ -4,7 +4,7 @@ WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
 COPY frontend/.npmrc ./
-RUN npm ci
+RUN npm install --include=optional --no-fund --no-audit
 COPY frontend/ ./
 
 RUN npm run build
