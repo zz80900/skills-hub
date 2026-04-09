@@ -95,7 +95,7 @@ onMounted(() => {
 <template>
   <header class="site-header">
     <div class="site-header__inner">
-      <router-link class="site-header__brand" to="/">SSC Skills Library</router-link>
+      <router-link class="site-header__brand" to="/">NEXGO Skills</router-link>
       <nav class="site-header__nav">
         <router-link
           class="site-header__link"

@@ -2,7 +2,7 @@ services:
   app:
     image: ghcr.io/zz80900/skills-hub:${APP_IMAGE_TAG:-latest}
     pull_policy: always
-    container_name: ssc-skills-lib-app
+    container_name: nexgo-skills-lib-app
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -26,13 +26,13 @@ services:
       AD_KDESTROY_COMMAND: ${AD_KDESTROY_COMMAND:-kdestroy}
       AD_KERBEROS_TIMEOUT_SECONDS: ${AD_KERBEROS_TIMEOUT_SECONDS:-15}
       AD_LDAP_TIMEOUT_SECONDS: ${AD_LDAP_TIMEOUT_SECONDS:-15}
-      NEXUS_RAW_BASE_URL: ${NEXUS_RAW_BASE_URL:-http://nexus.example.invalid:8081/repository/raw-repo/skills}
+      NEXUS_RAW_BASE_URL: ${NEXUS_RAW_BASE_URL:-}
       NEXUS_USERNAME: ${NEXUS_USERNAME:-}
       NEXUS_PASSWORD: ${NEXUS_PASSWORD:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000}
       SKILLS_API_BASE_URL: ${SKILLS_API_BASE_URL:-https://skills.sh}
       SKILLS_API_TIMEOUT_SECONDS: ${SKILLS_API_TIMEOUT_SECONDS:-15}
-      CLI_INSTALL_COMMAND: '${CLI_INSTALL_COMMAND:-npm install @xgd/nexgo-skills -g --registry "http://nexus.example.invalid:8081/repository/npm-all"}'
+      CLI_INSTALL_COMMAND: ${CLI_INSTALL_COMMAND:}
     depends_on:
       postgres:
         condition: service_healthy
