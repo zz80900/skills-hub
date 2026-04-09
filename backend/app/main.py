@@ -50,6 +50,7 @@ if frontend_dist.exists():
     assets_dir = frontend_dist / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend-static")
 
 
 @app.get("/health")
