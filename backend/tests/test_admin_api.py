@@ -618,7 +618,7 @@ def test_public_config_returns_cli_install_command(client: TestClient):
     assert response.status_code == 200
     command = response.json()["cli_install_command"]
     assert command.startswith("npm install")
-    assert "@xgd/ssc-skills" in command
+    assert "@xgd/nexgo-skills" in command
 
 
 def test_public_remote_pagination_uses_page_arguments(client, monkeypatch):

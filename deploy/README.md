@@ -38,7 +38,7 @@ NEXUS_RAW_BASE_URL=http://nexus.example.invalid:8081/repository/raw-repo/skills
 NEXUS_USERNAME=your-nexus-username
 NEXUS_PASSWORD=your-nexus-password
 CORS_ORIGINS=http://localhost:8000
-CLI_INSTALL_COMMAND=npm install @xgd/ssc-skills -g --registry "http://nexus.example.invalid:8081/repository/npm-all"
+CLI_INSTALL_COMMAND=npm install @xgd/nexgo-skills -g --registry "http://nexus.example.invalid:8081/repository/npm-all"
 ```
 
 AD 配置最小示例：

@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     skills_api_base_url: str = "https://skills.sh"
     skills_api_timeout_seconds: float = 15.0
     cli_install_command: str = (
-        'npm install @xgd/ssc-skills -g --registry "http://nexus.example.invalid:8081/repository/npm-all"'
+        'npm install @xgd/nexgo-skills -g --registry "http://nexus.example.invalid:8081/repository/npm-all"'
     )
 
     @field_validator("cors_origins", mode="before")
