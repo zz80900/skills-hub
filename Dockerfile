@@ -3,7 +3,7 @@ FROM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
-RUN npm config set registry https://registry.npmmirror.com && npm ci
+RUN npm ci --registry=https://registry.npmjs.org
 
 COPY frontend/ ./
 RUN npm run build
