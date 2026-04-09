@@ -14,6 +14,7 @@ class PublicSkillSummary(BaseModel):
     install_command: str
     installs: int | None = None
     version: str | None = None
+    contributor: str | None = None
 
 
 class SkillListResponse(BaseModel):
@@ -43,6 +44,7 @@ class PublicSkillDetail(BaseModel):
     detail_url: str | None = None
     source_repository: str | None = None
     version: str | None = None
+    contributor: str | None = None
     history_versions: list[str] = Field(default_factory=list)
 
 

@@ -44,14 +44,6 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(workspace_router)
 
-frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-frontend_index = frontend_dist / "index.html"
-if frontend_dist.exists():
-    assets_dir = frontend_dist / "assets"
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend-static")
-
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
@@ -66,6 +58,15 @@ def app_healthcheck() -> dict[str, str]:
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail="Database unavailable") from exc
     return {"status": "ok", "database": "ok"}
+
+
+frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+frontend_index = frontend_dist / "index.html"
+if frontend_dist.exists():
+    assets_dir = frontend_dist / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend-static")
 
 
 @app.get("/{full_path:path}", include_in_schema=False)

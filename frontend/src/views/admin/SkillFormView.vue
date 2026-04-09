@@ -51,8 +51,6 @@ async function handleSubmit() {
   error.value = ''
   try {
     const payload = new FormData()
-    payload.append('contributor', form.contributor.trim())
-    payload.append('contributor_submitted', 'true')
     payload.append('description_markdown', form.description_markdown)
 
     if (isEditMode.value) {
@@ -111,13 +109,13 @@ onMounted(() => {
             />
           </label>
 
-          <label class="field">
-            <span>贡献者（可选）</span>
+          <label v-if="isEditMode" class="field">
+            <span>上传者</span>
             <input
               v-model="form.contributor"
               class="text-input"
               type="text"
-              placeholder="例如：张三 / 平台研发组"
+              disabled
             />
           </label>
 

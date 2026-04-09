@@ -161,7 +161,7 @@ function clearSearch() {
               <th scope="col">标题</th>
               <th v-if="isAdmin" scope="col">归属用户</th>
               <th scope="col">当前版本</th>
-              <th scope="col">贡献者</th>
+              <th scope="col">上传者</th>
               <th v-if="isAdmin" scope="col">状态</th>
               <th scope="col">更新时间</th>
             </tr>

@@ -185,6 +185,10 @@ onBeforeUnmount(() => {
                 </div>
                 <small class="detail-meta__hint">切换后会展示对应版本的 Skill 详情内容。</small>
               </div>
+              <div v-if="skill.contributor" class="detail-meta__item">
+                <span>上传者</span>
+                <code>{{ skill.contributor }}</code>
+              </div>
               <CommandSnippet label="Skill 安装" :command="skill.install_command" compact />
               <div v-if="skill.source_repository || skill.detail_url" class="detail-meta__item">
                 <span>来源信息</span>

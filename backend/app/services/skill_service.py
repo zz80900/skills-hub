@@ -189,16 +189,15 @@ def create_skill(
     name: str,
     description_markdown: str,
     package_url: str,
-    contributor: str | None = None,
 ) -> Skill:
-    normalized_contributor = normalize_optional_text(contributor)
+    contributor = (owner.display_name or owner.username).strip() or None
     description_html = render_markdown(description_markdown)
     skill = Skill(
         name=name,
         owner_id=owner.id,
         description_markdown=description_markdown,
         description_html=description_html,
-        contributor=normalized_contributor,
+        contributor=contributor,
         package_url=package_url,
         current_version=INITIAL_SKILL_VERSION,
     )
@@ -210,7 +209,7 @@ def create_skill(
             version=INITIAL_SKILL_VERSION,
             description_markdown=description_markdown,
             description_html=description_html,
-            contributor=normalized_contributor,
+            contributor=contributor,
             package_url=package_url,
         )
     )
@@ -224,16 +223,13 @@ def update_skill(
     skill: Skill,
     description_markdown: str,
     package_url: str | None,
-    contributor: str | object = UNSET,
 ) -> Skill:
     next_version = get_next_version(skill.current_version)
-    next_contributor = skill.contributor if contributor is UNSET else normalize_optional_text(contributor)
     next_package_url = package_url or skill.package_url
     description_html = render_markdown(description_markdown)
 
     skill.description_markdown = description_markdown
     skill.description_html = description_html
-    skill.contributor = next_contributor
     skill.package_url = next_package_url
     skill.current_version = next_version
 
@@ -245,7 +241,7 @@ def update_skill(
             version=next_version,
             description_markdown=description_markdown,
             description_html=description_html,
-            contributor=next_contributor,
+            contributor=skill.contributor,
             package_url=next_package_url,
         )
     )
@@ -301,6 +297,7 @@ def to_public_skill_summary(skill: Skill) -> dict[str, Any]:
         "install_command": get_install_command(skill.name),
         "installs": None,
         "version": skill.current_version,
+        "contributor": skill.contributor,
     }
 
 
@@ -332,6 +329,7 @@ def to_public_skill_version_detail(
         "install_command": get_install_command(skill.name),
         "installs": None,
         "version": version.version,
+        "contributor": version.contributor,
         "history_versions": _history_versions(versions),
         "detail_url": None,
         "source_repository": None,

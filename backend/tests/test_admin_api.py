@@ -425,12 +425,12 @@ def test_upgrade_skill_creates_new_version_history(client: TestClient, monkeypat
         "/api/workspace/skills/demo-upgrade",
         headers=auth_headers(client),
         files={"zip_file": ("demo-upgrade.zip", make_zip("# second"), "application/zip")},
-        data={"description_markdown": "new description", "contributor": "", "contributor_submitted": "true"},
+        data={"description_markdown": "new description"},
     )
     assert update_response.status_code == 200
     payload = update_response.json()
     assert payload["description_markdown"] == "new description"
-    assert payload["contributor"] is None
+    assert payload["contributor"] == "admin"
     assert payload["current_version"] == "1.0.1"
     assert [item["version"] for item in payload["version_history"]] == ["1.0.1", "1.0.0"]
 

@@ -121,7 +121,7 @@ watch(
             <small>创建于 {{ formatDate(skill.created_at) }}，最近更新 {{ formatDate(skill.updated_at) }}</small>
           </div>
           <div class="detail-meta__item">
-            <span>贡献者</span>
+            <span>上传者</span>
             <code>{{ skill.contributor || '未填写' }}</code>
           </div>
           <div v-if="isAdmin" class="detail-meta__item">
@@ -141,7 +141,7 @@ watch(
             <thead>
               <tr>
                 <th scope="col">版本号</th>
-                <th scope="col">贡献者</th>
+                <th scope="col">上传者</th>
                 <th scope="col">生成时间</th>
               </tr>
             </thead>

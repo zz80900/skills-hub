@@ -51,7 +51,6 @@ async def create_workspace_skill(
     current_user: User = Depends(get_current_user),
     name: str = Form(...),
     description_markdown: str = Form(""),
-    contributor: str | None = Form(default=None),
     zip_file: UploadFile = File(...),
 ):
     validated_name = validate_skill_name(name)
@@ -62,7 +61,7 @@ async def create_workspace_skill(
     package_url = nexus_service.upload_skill_zip(validated_name, zip_content)
 
     try:
-        skill = create_skill(session, current_user, validated_name, description_markdown, package_url, contributor)
+        skill = create_skill(session, current_user, validated_name, description_markdown, package_url)
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Skill 已存在") from exc
@@ -76,8 +75,6 @@ async def update_workspace_skill(
     session: DbSession,
     current_user: User = Depends(get_current_user),
     description_markdown: str = Form(""),
-    contributor: str | None = Form(default=None),
-    contributor_submitted: bool = Form(default=False),
     zip_file: UploadFile | None = File(default=None),
 ):
     validated_name = validate_skill_name(name)
@@ -90,11 +87,7 @@ async def update_workspace_skill(
         zip_content = await validate_zip_file(zip_file)
         package_url = nexus_service.upload_skill_zip(validated_name, zip_content)
 
-    if contributor_submitted:
-        next_contributor = contributor if contributor is not None else ""
-        skill = update_skill(session, skill, description_markdown, package_url, next_contributor)
-    else:
-        skill = update_skill(session, skill, description_markdown, package_url)
+    skill = update_skill(session, skill, description_markdown, package_url)
     versions = get_skill_versions(session, skill)
     return ManagedSkillDetail.model_validate(to_admin_skill_detail(skill, versions))
 
