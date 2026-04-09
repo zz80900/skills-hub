@@ -49,7 +49,7 @@
 - `kdc`: `10.19.8.248`
 - `ldapUrl`: `ldap://10.19.8.248:389`
 - `baseDn`: `OU=新国都集团|OU=支付硬件事业群|OU=技术中心`
-- 默认 principal：`ssc-skills@XGD.COM`
+- 默认 principal：`nexgo-skills@XGD.COM`
 
 生产版新增推荐配置：
 
@@ -109,11 +109,11 @@
 
 账号输入规则：
 
-- `--principal` 支持完整 principal，例如 `ssc-skills@XGD.COM`
+- `--principal` 支持完整 principal，例如 `nexgo-skills@XGD.COM`
 - `--username` 支持三种格式：
-- `ssc-skills`
-- `ssc-skills@XGD.COM`
-- `XGD\ssc-skills`
+- `nexgo-skills`
+- `nexgo-skills@XGD.COM`
+- `XGD\nexgo-skills`
 
 principal 归一化规则：
 
@@ -214,7 +214,7 @@ LDAP 不复用 Kerberos ticket，而是使用 simple bind。
 
 设计原因：
 
-- 当前服务账号 `ssc-skills` 的实际 DN 是 `CN=ssc-skills,OU=LDAPCN,DC=xgd,DC=com`
+- 当前服务账号 `nexgo-skills` 的实际 DN 是 `CN=nexgo-skills,OU=LDAPCN,DC=xgd,DC=com`
 - 它并不在默认配置的 OU 下
 - 如果不做域根回退，会出现“认证成功但 LDAP 查不到用户”的误判
 
@@ -238,11 +238,11 @@ LDAP 不复用 Kerberos ticket，而是使用 simple bind。
 3. `cn`
 4. `name`
 
-当前账号 `ssc-skills` 的真实结果：
+当前账号 `nexgo-skills` 的真实结果：
 
 - `sn = 技能`
 - `givenName = 测试`
-- `displayName = ssc-skills`
+- `displayName = nexgo-skills`
 - 最终 `ldap name = 技能测试`
 - `name source = sn+givenName`
 
@@ -430,15 +430,15 @@ Python 版本完成后，至少要满足以下验收项：
 
 ## 12. 当前实测基线
 
-当前 Java 版本针对账号 `ssc-skills` 的实测结果如下：
+当前 Java 版本针对账号 `nexgo-skills` 的实测结果如下：
 
 - Kerberos 登录成功
-- principal：`ssc-skills@XGD.COM`
+- principal：`nexgo-skills@XGD.COM`
 - LDAP 查询成功
 - `surname = 技能`
 - `givenName = 测试`
 - `ldap name = 技能测试`
-- DN：`CN=ssc-skills,OU=LDAPCN,DC=xgd,DC=com`
+- DN：`CN=nexgo-skills,OU=LDAPCN,DC=xgd,DC=com`
 
 这个结果可以作为 Python 重构后的对比基线。
 

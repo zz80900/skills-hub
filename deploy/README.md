@@ -12,14 +12,14 @@
 在 `deploy` 目录下基于示例文件创建 `.env`：
 
 ```powershell
-cd "E:/code_ai/ssc-skills-lib/deploy"
+cd "E:/code_ai/nexgo-skills-lib/deploy"
 cp ".env.example" ".env"
 ```
 
 说明：
 
 - Docker 部署只会读取当前目录下的 `deploy/.env`
-- `backend/.env` 已被 [.dockerignore](/E:/code_ai/ssc-skills-lib/.dockerignore) 排除，不会打进镜像，也不会被容器内的 FastAPI 自动读取
+- `backend/.env` 已被 [.dockerignore](/E:/code_ai/nexgo-skills-lib/.dockerignore) 排除，不会打进镜像，也不会被容器内的 FastAPI 自动读取
 - 如果你把 AD 配置只写在 `backend/.env`，登录时仍会返回 `AD 认证服务暂不可用`
 
 关键配置示例：
@@ -50,10 +50,10 @@ AD_KDC=10.18.8.16
 AD_LDAP_URL=ldap://10.18.8.16:389
 AD_BASE_DN=OU=新国都集团|OU=支付硬件事业群|OU=技术中心
 AD_NETBIOS_DOMAIN=XGD
-AD_LDAP_BIND_USERNAME=ssc-skills
+AD_LDAP_BIND_USERNAME=nexgo-skills
 AD_LDAP_BIND_PASSWORD=替换成实际密码
 # 目录要求 UPN 绑定时再启用
-AD_LDAP_BIND_PRINCIPAL=ssc-skills@XGD.COM
+AD_LDAP_BIND_PRINCIPAL=nexgo-skills@XGD.COM
 ```
 
 注意：
@@ -66,7 +66,7 @@ AD_LDAP_BIND_PRINCIPAL=ssc-skills@XGD.COM
 ## 启动
 
 ```powershell
-cd "E:/code_ai/ssc-skills-lib/deploy"
+cd "E:/code_ai/nexgo-skills-lib/deploy"
 docker compose pull
 docker compose up -d
 ```
@@ -74,7 +74,7 @@ docker compose up -d
 如果之前已经用旧配置创建过容器，先清理再启动：
 
 ```powershell
-cd "E:/code_ai/ssc-skills-lib/deploy"
+cd "E:/code_ai/nexgo-skills-lib/deploy"
 docker compose down -v
 docker compose pull
 docker compose up -d
@@ -89,6 +89,6 @@ docker compose up -d
 ## 停止
 
 ```powershell
-cd "E:/code_ai/ssc-skills-lib/deploy"
+cd "E:/code_ai/nexgo-skills-lib/deploy"
 docker compose down
 ```

@@ -32,7 +32,7 @@ const workspaceLabel = computed(() => (isAdmin() ? '工作台' : '我的 Skill')
 const infoModalTitle = computed(() => (activeInfoTab.value === 'cli' ? '安装 CLI' : '使用教程'))
 const infoModalSummary = computed(() =>
   activeInfoTab.value === 'cli'
-    ? '先安装 ssc-skills CLI，再通过首页复制具体 Skill 安装命令。'
+    ? '先安装 nexgo-skills CLI，再通过首页复制具体 Skill 安装命令。'
     : '教程与安装入口已固定在顶部导航，登录前后都可以随时打开。',
 )
 const userBadge = computed(() => {
@@ -136,7 +136,7 @@ onMounted(() => {
     @close="closeInfoModal"
   >
     <ol v-if="activeInfoTab === 'guide'" class="info-modal__list">
-      <li>先点击“安装 CLI”，复制并执行 ssc-skills CLI 安装命令。</li>
+      <li>先点击“安装 CLI”，复制并执行 nexgo-skills CLI 安装命令。</li>
       <li>通过首页 Tab 在本地库与 skills.sh 之间切换。</li>
       <li>切到 skills.sh 后向下滚动，可按瀑布流方式持续加载更多 Skill。</li>
       <li>登录进入工作台后，顶部导航依旧保留这两个入口，避免关键帮助信息突然消失。</li>

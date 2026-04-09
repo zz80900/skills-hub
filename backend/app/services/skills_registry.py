@@ -113,7 +113,7 @@ class SkillsHomepageParser(HTMLParser):
 
 def build_remote_install_command(source: str, skill_name: str) -> str:
     repository_url = f'https://github.com/{source.strip().strip("/")}'
-    return f'ssc-skills add "{repository_url}" --as --skill "{skill_name}"'
+    return f'nexgo-skills add "{repository_url}" --as --skill "{skill_name}"'
 
 
 def _paginate(items: list[RegistrySkillSummary], page: int, page_size: int) -> tuple[list[RegistrySkillSummary], bool]:

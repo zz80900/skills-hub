@@ -552,7 +552,7 @@ def test_public_skills_groups_local_and_remote_results(client: TestClient, monke
                 source="vercel-labs/agent-skills",
                 installs=1234,
                 description_html="<p>来源仓库：<code>vercel-labs/agent-skills</code></p>",
-                install_command='ssc-skills add "https://github.com/vercel-labs/agent-skills" --as --skill "frontend-design"',
+                install_command='nexgo-skills add "https://github.com/vercel-labs/agent-skills" --as --skill "frontend-design"',
             )
         ], True
 
@@ -567,7 +567,7 @@ def test_public_skills_groups_local_and_remote_results(client: TestClient, monke
     assert payload["local_items"][0]["name"] == "plm-assistant"
     assert payload["local_items"][0]["source"] == "local"
     assert payload["remote_items"][0]["source"] == "skills_sh"
-    assert payload["remote_items"][0]["install_command"].startswith('ssc-skills add "https://github.com/vercel-labs/agent-skills" --as')
+    assert payload["remote_items"][0]["install_command"].startswith('nexgo-skills add "https://github.com/vercel-labs/agent-skills" --as')
     assert payload["remote_error"] is None
     assert payload["remote_has_more"] is True
 
@@ -581,7 +581,7 @@ def test_public_remote_detail_uses_source_and_slug(client: TestClient, monkeypat
             source="vercel-labs/agent-skills",
             installs=4321,
             description_html="<p>Remote detail</p>",
-            install_command='ssc-skills add "https://github.com/vercel-labs/agent-skills" --as --skill "frontend-design"',
+            install_command='nexgo-skills add "https://github.com/vercel-labs/agent-skills" --as --skill "frontend-design"',
             detail_url="https://skills.sh/vercel-labs/agent-skills/frontend-design",
         )
 
@@ -592,7 +592,7 @@ def test_public_remote_detail_uses_source_and_slug(client: TestClient, monkeypat
     payload = response.json()
     assert payload["source"] == "skills_sh"
     assert payload["source_repository"] == "vercel-labs/agent-skills"
-    assert payload["install_command"] == 'ssc-skills add "https://github.com/vercel-labs/agent-skills" --as --skill "frontend-design"'
+    assert payload["install_command"] == 'nexgo-skills add "https://github.com/vercel-labs/agent-skills" --as --skill "frontend-design"'
     assert payload["version"] is None
     assert payload["history_versions"] == []
 
@@ -633,7 +633,7 @@ def test_public_remote_pagination_uses_page_arguments(client, monkeypatch):
                 source="vercel-labs/agent-skills",
                 installs=999,
                 description_html="<p>Remote summary</p>",
-                install_command='ssc-skills add "https://github.com/vercel-labs/agent-skills" --as --skill "ui-ux-pro-max"',
+                install_command='nexgo-skills add "https://github.com/vercel-labs/agent-skills" --as --skill "ui-ux-pro-max"',
             )
         ], False
 

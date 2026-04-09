@@ -2,8 +2,8 @@ import { reactive } from 'vue'
 import { buildEncryptedPassword } from './security'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
-const TOKEN_KEY = 'ssc-skills-session-token'
-const USER_KEY = 'ssc-skills-session-user'
+const TOKEN_KEY = 'nexgo-skills-session-token'
+const USER_KEY = 'nexgo-skills-session-user'
 
 function readToken() {
   return window.localStorage.getItem(TOKEN_KEY)

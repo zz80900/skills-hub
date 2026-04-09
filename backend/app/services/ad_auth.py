@@ -417,7 +417,7 @@ def describe_ldap_server_kwargs(server_kwargs: dict[str, Any]) -> str:
 def create_kerberos_temp_dir(parent_dir: Path | None = None) -> Path:
     root_dir = parent_dir or Path(tempfile.gettempdir())
     while True:
-        path = root_dir / f"ssc-skills-krb5-{secrets.token_hex(8)}"
+        path = root_dir / f"nexgo-skills-krb5-{secrets.token_hex(8)}"
         try:
             path.mkdir(parents=True, exist_ok=False)
             return path

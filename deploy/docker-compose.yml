@@ -45,7 +45,7 @@ services:
 
   postgres:
     image: postgres:16
-    container_name: ssc-skills-lib-postgres
+    container_name: nexgo-skills-lib-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-skills_lib}

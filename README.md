@@ -27,7 +27,7 @@ frontend/  Vue 前端
 1. 创建虚拟环境并安装依赖：
 
 ```powershell
-cd "E:/code_ai/ssc-skills-lib/backend"
+cd "E:/code_ai/nexgo-skills-lib/backend"
 python -m venv ".venv"
 ".venv/Scripts/pip" install -r "requirements.txt"
 ```
@@ -47,7 +47,7 @@ Copy-Item ".env.example" ".env"
 ## 启动前端
 
 ```powershell
-cd "E:/code_ai/ssc-skills-lib/frontend"
+cd "E:/code_ai/nexgo-skills-lib/frontend"
 npm install
 npm run dev
 ```
@@ -59,14 +59,14 @@ npm run dev
 
 ## Docker 部署
 
-单镜像同时承载前端和后端，编排文件位于 [deploy/docker-compose.yml](E:/code_ai/ssc-skills-lib/deploy/docker-compose.yml)。
+单镜像同时承载前端和后端，编排文件位于 [deploy/docker-compose.yml](E:/code_ai/nexgo-skills-lib/deploy/docker-compose.yml)。
 
 ```powershell
-cd "E:/code_ai/ssc-skills-lib/deploy"
+cd "E:/code_ai/nexgo-skills-lib/deploy"
 docker compose up -d --build
 ```
 
-详细说明见 [deploy/README.md](E:/code_ai/ssc-skills-lib/deploy/README.md)。
+详细说明见 [deploy/README.md](E:/code_ai/nexgo-skills-lib/deploy/README.md)。
 
 ## 初始管理员账号
 
@@ -81,4 +81,4 @@ docker compose up -d --build
 - AD 用户使用 Kerberos 校验账号密码，LDAP 仅使用服务账号查询姓名与 principal
 - AD 用户首次登录会自动在系统内创建 `USER` 普通用户，并记录用户来源、展示姓名、外部 principal
 - AD 用户后续仍走域控认证，不支持后台本地重置密码
-- 详细认证约束见 [docs/python-ad.md](E:/code_ai/ssc-skills-lib/docs/python-ad.md)
+- 详细认证约束见 [docs/python-ad.md](E:/code_ai/nexgo-skills-lib/docs/python-ad.md)
