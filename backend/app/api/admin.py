@@ -2,12 +2,34 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DbSession, require_admin
+from app.core.config import get_settings
+from app.core.encryption import DecryptionError, decrypt_and_validate
+from app.core.rsa import get_challenge_store, get_key_manager
 from app.models.user import User
 from app.schemas.user import UserCreateRequest, UserPasswordResetRequest, UserSummary, UserUpdateRequest
 from app.services.user_service import create_user, get_user_by_id, list_users, reset_user_password, to_user_summary, update_user
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+def _extract_password(payload, expected_purpose: str) -> str:
+    if payload.is_encrypted:
+        try:
+            decrypted = decrypt_and_validate(
+                encrypted_password=payload.encrypted_password,
+                challenge_id=payload.challenge_id,
+                client_ts=payload.client_ts,
+                nonce=payload.nonce,
+                key_manager=get_key_manager(),
+                challenge_store=get_challenge_store(),
+                expected_purpose=expected_purpose,
+                max_clock_skew=get_settings().rsa_max_clock_skew_seconds,
+            )
+            return decrypted.password
+        except DecryptionError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return payload.password
 
 
 @router.get("/users", response_model=list[UserSummary])
@@ -22,7 +44,8 @@ def create_admin_user(
     _: User = Depends(require_admin),
 ):
     try:
-        user = create_user(session, payload.username, payload.password, payload.role, payload.is_active)
+        password = _extract_password(payload, "admin_create_user")
+        user = create_user(session, payload.username, password, payload.role, payload.is_active)
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已存在") from exc
@@ -63,5 +86,6 @@ def reset_admin_user_password(
     user = get_user_by_id(session, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
-    user = reset_user_password(session, user, payload.password)
+    password = _extract_password(payload, "admin_reset_password")
+    user = reset_user_password(session, user, password)
     return UserSummary.model_validate(to_user_summary(user))

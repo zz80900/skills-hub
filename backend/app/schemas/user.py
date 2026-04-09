@@ -19,9 +19,17 @@ class UserSummary(BaseModel):
 
 class UserCreateRequest(BaseModel):
     username: str
-    password: str
+    password: str = ""
+    encrypted_password: str | None = None
+    challenge_id: str | None = None
+    client_ts: int | None = None
+    nonce: str | None = None
     role: str = "USER"
     is_active: bool = True
+
+    @property
+    def is_encrypted(self) -> bool:
+        return bool(self.encrypted_password)
 
 
 class UserUpdateRequest(BaseModel):
@@ -31,4 +39,12 @@ class UserUpdateRequest(BaseModel):
 
 
 class UserPasswordResetRequest(BaseModel):
-    password: str
+    password: str = ""
+    encrypted_password: str | None = None
+    challenge_id: str | None = None
+    client_ts: int | None = None
+    nonce: str | None = None
+
+    @property
+    def is_encrypted(self) -> bool:
+        return bool(self.encrypted_password)

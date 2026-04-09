@@ -15,6 +15,7 @@ from app.api.admin import router as admin_router
 from app.api.public import router as public_router
 from app.api.workspace import router as workspace_router
 from app.core.config import get_settings
+from app.core.rsa import initialize_key_manager, initialize_challenge_store
 from app.db.base import Base
 from app.db.schema import ensure_schema_compatibility
 from app.db.session import engine
@@ -22,6 +23,8 @@ from app.db.session import engine
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    initialize_key_manager(get_settings())
+    initialize_challenge_store()
     Base.metadata.create_all(bind=engine)
     ensure_schema_compatibility(engine)
     yield

@@ -3,7 +3,23 @@ from pydantic import BaseModel
 
 class LoginRequest(BaseModel):
     username: str
-    password: str
+    password: str = ""
+    encrypted_password: str | None = None
+    challenge_id: str | None = None
+    client_ts: int | None = None
+    nonce: str | None = None
+
+    @property
+    def is_encrypted(self) -> bool:
+        return bool(self.encrypted_password)
+
+
+class ChallengeResponse(BaseModel):
+    challenge_id: str
+    public_key_pem: str
+    server_nonce: str
+    expires_in_seconds: int
+    algorithm: str
 
 
 class AuthenticatedUser(BaseModel):

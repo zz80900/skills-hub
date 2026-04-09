@@ -12,7 +12,7 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    app_title: str = "SSC Skills Library"
+    app_title: str = "NEXGO Skills"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/skills_lib"
     admin_username: str = "admin"
     admin_password: str = "admin"
@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     ad_kdestroy_command: str = "kdestroy"
     ad_kerberos_timeout_seconds: float = 15.0
     ad_ldap_timeout_seconds: float = 15.0
+    rsa_private_key_pem: str | None = None
+    challenge_ttl_seconds: int = 300
+    rsa_max_clock_skew_seconds: int = 30
     nexus_raw_base_url: str = "http://nexus.example.invalid:8081/repository/raw-repo/skills"
     nexus_username: str = ""
     nexus_password: str = ""
