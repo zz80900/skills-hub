@@ -22,7 +22,11 @@ async function handleSubmit() {
     setSession(payload.access_token, payload.user)
     await router.push(typeof route.query.redirect === 'string' ? route.query.redirect : getWorkspaceRoute())
   } catch (err) {
-    error.value = err.message
+    if (err.message && err.message.includes('挑战')) {
+      error.value = '安全验证失败，请刷新页面后重试'
+    } else {
+      error.value = err.message || '登录失败'
+    }
   } finally {
     submitting.value = false
   }

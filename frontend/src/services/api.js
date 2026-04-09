@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { buildEncryptedPassword } from './security'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const TOKEN_KEY = 'ssc-skills-session-token'
@@ -197,10 +198,16 @@ export async function fetchLocalSkillVersion(slug, version) {
   )
 }
 
-export function login(payload) {
+export async function login(payload) {
+  const encrypted = await buildEncryptedPassword(payload.password, 'login', {
+    username: payload.username,
+  })
   return request(buildUrl('/api/auth/login'), {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      username: payload.username,
+      ...encrypted,
+    }),
   })
 }
 
@@ -249,9 +256,17 @@ export async function fetchUsers() {
 }
 
 export async function createUser(payload) {
+  const body = { ...payload }
+  if (body.password) {
+    const encrypted = await buildEncryptedPassword(body.password, 'admin_create_user', {
+      username: body.username,
+    })
+    delete body.password
+    Object.assign(body, encrypted)
+  }
   return await request(buildUrl('/api/admin/users'), {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   })
 }
 
@@ -263,8 +278,11 @@ export async function updateUser(userId, payload) {
 }
 
 export async function resetUserPassword(userId, password) {
+  const encrypted = await buildEncryptedPassword(password, 'admin_reset_password', {
+    user_id: userId,
+  })
   return await request(buildUrl(`/api/admin/users/${encodeURIComponent(userId)}/password`), {
     method: 'PUT',
-    body: JSON.stringify({ password }),
+    body: JSON.stringify(encrypted),
   })
 }
