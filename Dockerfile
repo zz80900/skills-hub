@@ -4,7 +4,8 @@ WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
 COPY frontend/.npmrc ./
-RUN npm install --include=optional --no-fund --no-audit
+# Remove lock file to allow Alpine (musl) compatible deps to be resolved
+RUN rm -f package-lock.json && npm install --include=optional --no-fund --no-audit
 COPY frontend/ ./
 
 RUN npm run build
