@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -30,8 +31,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/api/healthcheck" not in record.getMessage()
+
+
 settings = get_settings()
 app = FastAPI(title=settings.app_title, lifespan=lifespan)
+logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
