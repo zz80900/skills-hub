@@ -208,7 +208,7 @@ pre {
 .detail-panel__header p + p,
 .search-panel__lead,
 .detail-modal__summary {
-  max-width: 62ch;
+  max-width: max-content;
   margin: 14px 0 0;
   color: var(--text-soft);
   font-size: 1rem;
