@@ -132,33 +132,6 @@ watch(
           <CommandSnippet label="Skill 安装" :command="skill.install_command" />
         </div>
 
-        <section class="admin-history">
-          <div class="admin-history__header">
-            <h2>版本历史</h2>
-            <p>每次保存都会生成新的版本快照。</p>
-          </div>
-          <table class="admin-table admin-table--history">
-            <thead>
-              <tr>
-                <th scope="col">版本号</th>
-                <th scope="col">上传者</th>
-                <th scope="col">生成时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in skill.version_history" :key="item.version">
-                <td>
-                  <span class="version-chip" :class="{ 'is-current': item.version === skill.current_version }">
-                    {{ item.version }}
-                  </span>
-                </td>
-                <td>{{ item.contributor || '-' }}</td>
-                <td>{{ formatDate(item.created_at) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
         <article class="markdown-body detail-modal__body" v-html="skill.description_html"></article>
       </section>
     </main>

@@ -192,12 +192,6 @@ export async function fetchSkill(source, slug) {
   return normalizeSkillPayload(await request(buildUrl(`/api/skills/${source}/${slug}`)))
 }
 
-export async function fetchLocalSkillVersion(slug, version) {
-  return normalizeSkillPayload(
-    await request(buildUrl(`/api/skills/local/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}`)),
-  )
-}
-
 export async function login(payload) {
   const encrypted = await buildEncryptedPassword(payload.password, 'login', {
     username: payload.username,

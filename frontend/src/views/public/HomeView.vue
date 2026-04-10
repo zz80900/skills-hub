@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import SiteHeader from '../../components/SiteHeader.vue'
 import SkillCard from '../../components/SkillCard.vue'
 import SkillDetailModal from '../../components/SkillDetailModal.vue'
-import { fetchLocalSkillVersion, fetchSkill, fetchSkills } from '../../services/api'
+import { fetchSkill, fetchSkills } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,9 +39,6 @@ const activeLibraryTab = computed(() =>
 const isSkillModalOpen = computed(() => Boolean(route.query.skill))
 const activeDetailSource = computed(() =>
   typeof route.query.source === 'string' && route.query.source ? route.query.source : 'local',
-)
-const activeDetailVersion = computed(() =>
-  typeof route.query.version === 'string' && route.query.version ? route.query.version : '',
 )
 const localTabSummary = computed(() =>
   search.value ? `匹配 ${localSkills.value.length} 个结果` : `当前共 ${localSkills.value.length} 个 Skill`,
@@ -124,15 +121,13 @@ async function loadMoreRemoteSkills() {
   await loadSkills(search.value, { page: remotePage.value + 1, appendRemote: true })
 }
 
-async function loadSkillDetail(source, slug, version = '') {
+async function loadSkillDetail(source, slug) {
   const requestId = detailRequestId + 1
   detailRequestId = requestId
   detailLoading.value = true
   detailError.value = ''
   try {
-    const payload = source === 'local' && version
-      ? await fetchLocalSkillVersion(slug, version)
-      : await fetchSkill(source, slug)
+    const payload = await fetchSkill(source, slug)
     if (detailRequestId !== requestId) {
       return
     }
@@ -168,13 +163,6 @@ function closeSkillDetail() {
   router.replace({
     name: 'home',
     query: buildHomeQuery({ skill: null, source: null, version: null }),
-  })
-}
-
-function handleDetailVersionSelect(version) {
-  router.replace({
-    name: 'home',
-    query: buildHomeQuery({ version }),
   })
 }
 
@@ -226,14 +214,10 @@ watch(search, (value) => {
 })
 
 watch(
-  [() => route.query.skill, () => route.query.source, () => route.query.version],
-  ([slug, source, version]) => {
+  [() => route.query.skill, () => route.query.source],
+  ([slug, source]) => {
     if (typeof slug === 'string' && slug) {
-      loadSkillDetail(
-        typeof source === 'string' && source ? source : 'local',
-        slug,
-        typeof version === 'string' ? version : '',
-      )
+      loadSkillDetail(typeof source === 'string' && source ? source : 'local', slug)
       return
     }
     detailRequestId += 1
@@ -356,8 +340,6 @@ onBeforeUnmount(() => {
       :error="detailError"
       :skill="selectedSkill"
       :source="activeDetailSource"
-      :selected-version="activeDetailVersion"
-      @version-select="handleDetailVersionSelect"
       @close="closeSkillDetail"
     />
     <transition name="back-to-top-fade">
