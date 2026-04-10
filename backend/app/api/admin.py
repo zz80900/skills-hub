@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DbSession, require_admin
@@ -6,8 +6,15 @@ from app.core.config import get_settings
 from app.core.encryption import DecryptionError, decrypt_and_validate
 from app.core.rsa import get_challenge_store, get_key_manager
 from app.models.user import User
-from app.schemas.user import UserCreateRequest, UserPasswordResetRequest, UserSummary, UserUpdateRequest
-from app.services.user_service import create_user, get_user_by_id, list_users, reset_user_password, to_user_summary, update_user
+from app.schemas.user import UserCreateRequest, UserListResponse, UserPasswordResetRequest, UserSummary, UserUpdateRequest
+from app.services.user_service import (
+    create_user,
+    get_user_by_id,
+    reset_user_password,
+    search_users,
+    to_user_summary,
+    update_user,
+)
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -32,9 +39,23 @@ def _extract_password(payload, expected_purpose: str) -> str:
     return payload.password
 
 
-@router.get("/users", response_model=list[UserSummary])
-def list_admin_users(session: DbSession, _: User = Depends(require_admin)):
-    return [UserSummary.model_validate(to_user_summary(user)) for user in list_users(session)]
+@router.get("/users", response_model=UserListResponse)
+def list_admin_users(
+    session: DbSession,
+    _: User = Depends(require_admin),
+    q: str | None = Query(default=None, description="搜索用户名或姓名"),
+    page: int = Query(default=1, ge=1, description="页码"),
+    page_size: int = Query(default=20, ge=1, le=100, description="每页条数"),
+):
+    users, total = search_users(session, q, page=page, page_size=page_size)
+    items = [UserSummary.model_validate(to_user_summary(user)) for user in users]
+    return UserListResponse(
+        items=items,
+        page=page,
+        page_size=page_size,
+        total=total,
+        has_more=page * page_size < total,
+    )
 
 
 @router.post("/users", response_model=UserSummary, status_code=status.HTTP_201_CREATED)

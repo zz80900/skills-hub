@@ -83,6 +83,10 @@ def create_user_account(
     return response.json()
 
 
+def user_list_items(payload: dict) -> list[dict]:
+    return payload["items"]
+
+
 def create_local_skill(
     client: TestClient,
     monkeypatch,
@@ -154,7 +158,11 @@ def test_admin_user_management_endpoints(client: TestClient):
 
     list_response = client.get("/api/admin/users", headers=admin_headers)
     assert list_response.status_code == 200
-    usernames = {item["username"] for item in list_response.json()}
+    list_payload = list_response.json()
+    assert list_payload["page"] == 1
+    assert list_payload["page_size"] == 20
+    assert list_payload["total"] >= 2
+    usernames = {item["username"] for item in user_list_items(list_payload)}
     assert {"admin", "viewer"}.issubset(usernames)
 
     update_response = client.put(
@@ -223,7 +231,7 @@ def test_ad_login_provisions_user(client: TestClient, monkeypatch):
     admin_headers = auth_headers(client)
     users_response = client.get("/api/admin/users", headers=admin_headers)
     assert users_response.status_code == 200
-    alice = next(item for item in users_response.json() if item["username"] == "alice")
+    alice = next(item for item in user_list_items(users_response.json()) if item["username"] == "alice")
     assert alice["source"] == "AD"
     assert alice["display_name"] == "艾丽丝"
     assert alice["external_principal"] == "alice@XGD.COM"
@@ -250,7 +258,7 @@ def test_existing_ad_user_login_syncs_profile(client: TestClient, monkeypatch):
 
     admin_headers = auth_headers(client)
     users_response = client.get("/api/admin/users", headers=admin_headers)
-    alice = next(item for item in users_response.json() if item["username"] == "alice")
+    alice = next(item for item in user_list_items(users_response.json()) if item["username"] == "alice")
     assert alice["display_name"] == "艾丽丝-更新"
 
 
@@ -279,7 +287,7 @@ def test_reset_password_rejects_ad_user(client: TestClient, monkeypatch):
 
     admin_headers = auth_headers(client)
     users_response = client.get("/api/admin/users", headers=admin_headers)
-    alice_id = next(item["id"] for item in users_response.json() if item["username"] == "alice")
+    alice_id = next(item["id"] for item in user_list_items(users_response.json()) if item["username"] == "alice")
 
     reset_response = client.put(
         f"/api/admin/users/{alice_id}/password",
@@ -301,7 +309,7 @@ def test_rename_ad_user_rejected(client: TestClient, monkeypatch):
 
     admin_headers = auth_headers(client)
     users_response = client.get("/api/admin/users", headers=admin_headers)
-    alice_id = next(item["id"] for item in users_response.json() if item["username"] == "alice")
+    alice_id = next(item["id"] for item in user_list_items(users_response.json()) if item["username"] == "alice")
 
     update_response = client.put(
         f"/api/admin/users/{alice_id}",
@@ -320,6 +328,54 @@ def test_non_admin_cannot_manage_users(client: TestClient):
     response = client.get("/api/admin/users", headers=alice_headers)
     assert response.status_code == 403
     assert response.json()["detail"] == "仅管理员可访问该功能"
+
+
+def test_admin_user_list_supports_search_and_pagination(client: TestClient):
+    admin_headers = auth_headers(client)
+    create_user_account(client, admin_headers, "alice", "alice-pass")
+    create_user_account(client, admin_headers, "bob", "bob-pass")
+    create_user_account(client, admin_headers, "charlie", "charlie-pass")
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE users
+                SET display_name = 'Alice Zhang'
+                WHERE username = 'alice'
+                """
+            )
+        )
+
+    first_page_response = client.get("/api/admin/users", headers=admin_headers, params={"page": 1, "page_size": 2})
+    assert first_page_response.status_code == 200
+    first_page_payload = first_page_response.json()
+    assert first_page_payload["page"] == 1
+    assert first_page_payload["page_size"] == 2
+    assert first_page_payload["total"] == 4
+    assert first_page_payload["has_more"] is True
+    assert len(user_list_items(first_page_payload)) == 2
+
+    second_page_response = client.get("/api/admin/users", headers=admin_headers, params={"page": 2, "page_size": 2})
+    assert second_page_response.status_code == 200
+    second_page_payload = second_page_response.json()
+    assert second_page_payload["page"] == 2
+    assert second_page_payload["page_size"] == 2
+    assert second_page_payload["total"] == 4
+    assert second_page_payload["has_more"] is False
+    assert len(user_list_items(second_page_payload)) == 2
+
+    search_by_username_response = client.get("/api/admin/users", headers=admin_headers, params={"q": "char"})
+    assert search_by_username_response.status_code == 200
+    search_by_username_payload = search_by_username_response.json()
+    assert search_by_username_payload["total"] == 1
+    assert [item["username"] for item in user_list_items(search_by_username_payload)] == ["charlie"]
+
+    search_by_display_name_response = client.get("/api/admin/users", headers=admin_headers, params={"q": "zhang"})
+    assert search_by_display_name_response.status_code == 200
+    search_by_display_name_payload = search_by_display_name_response.json()
+    assert search_by_display_name_payload["total"] == 1
+    assert [item["username"] for item in user_list_items(search_by_display_name_payload)] == ["alice"]
 
 
 def test_upload_requires_skill_md(client: TestClient, monkeypatch):

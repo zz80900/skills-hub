@@ -2,7 +2,7 @@ import re
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -93,6 +93,32 @@ def get_user_by_login_identifier(session: Session, username: str) -> User | None
 def list_users(session: Session) -> list[User]:
     statement = select(User).order_by(User.created_at.desc(), User.id.desc())
     return list(session.scalars(statement))
+
+
+def search_users(
+    session: Session,
+    query: str | None = None,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[User], int]:
+    normalized_query = (query or "").strip()
+    statement = select(User)
+    count_statement = select(func.count(User.id))
+
+    if normalized_query:
+        keyword = f"%{normalized_query}%"
+        filter_condition = or_(
+            User.username.ilike(keyword),
+            User.display_name.ilike(keyword),
+        )
+        statement = statement.where(filter_condition)
+        count_statement = count_statement.where(filter_condition)
+
+    statement = statement.order_by(User.created_at.desc(), User.id.desc())
+    statement = statement.offset((page - 1) * page_size).limit(page_size)
+    total = int(session.scalar(count_statement) or 0)
+    return list(session.scalars(statement)), total
 
 
 def authenticate_user(session: Session, username: str, password: str) -> User | None:

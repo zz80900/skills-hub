@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import InfoModal from '../../components/InfoModal.vue'
 import SiteHeader from '../../components/SiteHeader.vue'
 import {
   authState,
@@ -14,18 +15,33 @@ import {
 
 const router = useRouter()
 const loading = ref(false)
+const loadingMore = ref(false)
 const submitting = ref(false)
 const resettingId = ref(null)
-const error = ref('')
+const listError = ref('')
+const actionError = ref('')
+const loadMoreError = ref('')
+const formError = ref('')
 const users = ref([])
+const search = ref('')
+const page = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+const hasMore = ref(false)
+const isUserModalOpen = ref(false)
 const editingUserId = ref(null)
 const editingUserSource = ref('LOCAL')
+const userSentinel = ref(null)
 const form = reactive({
   username: '',
   password: '',
   role: 'USER',
   is_active: true,
 })
+
+let searchTimer = null
+let userObserver = null
+let activeQueryId = 0
 
 const isEditMode = computed(() => editingUserId.value !== null)
 const isEditingAdUser = computed(() => isEditMode.value && editingUserSource.value === 'AD')
@@ -34,6 +50,19 @@ const submitLabel = computed(() => {
     return '提交中...'
   }
   return isEditMode.value ? '保存用户' : '创建用户'
+})
+const modalTitle = computed(() => (isEditMode.value ? '修改账号信息' : '创建新账号'))
+const modalSummary = computed(() =>
+  isEditMode.value
+    ? '可编辑角色和启用状态；本地用户可重置密码，AD 用户账号信息由域控同步。'
+    : '管理员只能手工创建本地账号，AD 用户会在首次登录时自动建档。',
+)
+const emptyStateText = computed(() => (search.value ? '未找到匹配用户。' : '当前还没有用户。'))
+const resultsSummary = computed(() => {
+  if (!total.value) {
+    return search.value ? '未找到匹配用户' : '当前没有用户'
+  }
+  return search.value ? `匹配 ${total.value} 个用户` : `当前共 ${total.value} 个账号`
 })
 
 function formatDate(value) {
@@ -49,6 +78,10 @@ function formatDate(value) {
   })
 }
 
+function formatSource(source) {
+  return source === 'AD' ? 'AD 域' : '本地'
+}
+
 function resetForm() {
   editingUserId.value = null
   editingUserSource.value = 'LOCAL'
@@ -56,35 +89,111 @@ function resetForm() {
   form.password = ''
   form.role = 'USER'
   form.is_active = true
+  formError.value = ''
 }
 
-async function loadUsers() {
-  loading.value = true
-  error.value = ''
-  try {
-    users.value = await fetchUsers()
-  } catch (err) {
-    error.value = err.message
-    if (!authState.token) {
-      router.push('/login')
-    }
-  } finally {
-    loading.value = false
-  }
+function closeUserModal() {
+  isUserModalOpen.value = false
+  resetForm()
+}
+
+function openCreateModal() {
+  resetForm()
+  isUserModalOpen.value = true
 }
 
 function startEdit(user) {
+  formError.value = ''
   editingUserId.value = user.id
   editingUserSource.value = user.source
   form.username = user.username
   form.password = ''
   form.role = user.role
   form.is_active = user.is_active
+  isUserModalOpen.value = true
+}
+
+function mergeUsers(items) {
+  const merged = [...users.value]
+  const seen = new Set(merged.map((user) => user.id))
+  items.forEach((item) => {
+    if (!seen.has(item.id)) {
+      seen.add(item.id)
+      merged.push(item)
+    }
+  })
+  users.value = merged
+}
+
+async function loadUsers(options = {}) {
+  const nextPage = options.page || 1
+  const append = Boolean(options.append)
+  const keyword = typeof options.query === 'string' ? options.query : search.value
+  const queryId = append ? activeQueryId : activeQueryId + 1
+
+  if (!append) {
+    activeQueryId = queryId
+    loading.value = true
+    loadingMore.value = false
+    listError.value = ''
+    actionError.value = ''
+    loadMoreError.value = ''
+  } else {
+    loadingMore.value = true
+    loadMoreError.value = ''
+  }
+
+  try {
+    const payload = await fetchUsers(keyword, { page: nextPage, pageSize: pageSize.value })
+    if (queryId !== activeQueryId) {
+      return
+    }
+
+    page.value = payload.page
+    pageSize.value = payload.page_size || pageSize.value
+    total.value = payload.total || 0
+    hasMore.value = Boolean(payload.has_more)
+
+    if (append) {
+      mergeUsers(payload.items || [])
+    } else {
+      users.value = payload.items || []
+    }
+  } catch (err) {
+    if (!authState.token) {
+      router.push('/login')
+    }
+    if (queryId !== activeQueryId) {
+      return
+    }
+
+    if (append) {
+      loadMoreError.value = err.message
+    } else {
+      listError.value = err.message
+      users.value = []
+      total.value = 0
+      hasMore.value = false
+    }
+  } finally {
+    if (append) {
+      loadingMore.value = false
+    } else if (queryId === activeQueryId) {
+      loading.value = false
+    }
+  }
+}
+
+async function loadMoreUsers() {
+  if (loading.value || loadingMore.value || !hasMore.value) {
+    return
+  }
+  await loadUsers({ page: page.value + 1, append: true })
 }
 
 async function handleSubmit() {
   submitting.value = true
-  error.value = ''
+  formError.value = ''
   try {
     if (isEditMode.value) {
       await updateUser(editingUserId.value, {
@@ -100,13 +209,13 @@ async function handleSubmit() {
         is_active: form.is_active,
       })
     }
-    resetForm()
-    await loadUsers()
+    closeUserModal()
+    await loadUsers({ page: 1, query: search.value })
   } catch (err) {
     if (err.message && err.message.includes('挑战')) {
-      error.value = '安全验证失败，请刷新页面后重试'
+      formError.value = '安全验证失败，请刷新页面后重试'
     } else {
-      error.value = err.message
+      formError.value = err.message
     }
   } finally {
     submitting.value = false
@@ -115,24 +224,26 @@ async function handleSubmit() {
 
 async function handlePasswordReset(user) {
   if (user.source === 'AD') {
-    error.value = 'AD 用户密码由域控管理，不支持本地重置'
+    actionError.value = 'AD 用户密码由域控管理，不支持本地重置'
     return
   }
+
   const nextPassword = window.prompt(`请输入用户「${user.username}」的新密码`)
   if (!nextPassword) {
     return
   }
 
   resettingId.value = user.id
-  error.value = ''
+  actionError.value = ''
+  loadMoreError.value = ''
   try {
     await resetUserPassword(user.id, nextPassword)
-    await loadUsers()
+    await loadUsers({ page: 1, query: search.value })
   } catch (err) {
     if (err.message && err.message.includes('挑战')) {
-      error.value = '安全验证失败，请刷新页面后重试'
+      actionError.value = '安全验证失败，请刷新页面后重试'
     } else {
-      error.value = err.message
+      actionError.value = err.message
     }
   } finally {
     resettingId.value = null
@@ -140,22 +251,73 @@ async function handlePasswordReset(user) {
 }
 
 async function quickToggle(user) {
-  error.value = ''
+  actionError.value = ''
+  loadMoreError.value = ''
   try {
     await updateUser(user.id, { is_active: !user.is_active })
-    await loadUsers()
+    await loadUsers({ page: 1, query: search.value })
   } catch (err) {
-    error.value = err.message
+    actionError.value = err.message
   }
 }
 
-onMounted(() => {
-  loadUsers()
+function resetUserObserver() {
+  if (userObserver) {
+    userObserver.disconnect()
+    userObserver = null
+  }
+}
+
+async function syncUserObserver() {
+  resetUserObserver()
+  await nextTick()
+  if (
+    typeof IntersectionObserver === 'undefined'
+    || typeof window === 'undefined'
+    || !userSentinel.value
+    || !users.value.length
+    || !hasMore.value
+    || loading.value
+    || loadingMore.value
+    || listError.value
+    || loadMoreError.value
+  ) {
+    return
+  }
+
+  userObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        loadMoreUsers()
+      }
+    },
+    { rootMargin: '320px 0px' },
+  )
+  userObserver.observe(userSentinel.value)
+}
+
+watch(search, (value) => {
+  window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => {
+    loadUsers({ page: 1, query: value })
+  }, 250)
 })
 
-function formatSource(source) {
-  return source === 'AD' ? 'AD 域' : '本地'
-}
+watch(
+  [hasMore, loading, loadingMore, listError, loadMoreError, () => users.value.length],
+  () => {
+    syncUserObserver()
+  },
+)
+
+onMounted(() => {
+  loadUsers({ page: 1 })
+})
+
+onBeforeUnmount(() => {
+  window.clearTimeout(searchTimer)
+  resetUserObserver()
+})
 </script>
 
 <template>
@@ -166,66 +328,58 @@ function formatSource(source) {
         <div class="admin-toolbar__intro">
           <p class="eyebrow">用户管理</p>
           <h1>账号与权限</h1>
-          <p class="admin-toolbar__summary">角色固定为管理员和普通用户，不提供角色 CRUD。</p>
+          <p class="admin-toolbar__summary">支持按用户名或姓名搜索，滚动到底部自动加载更多账号。</p>
         </div>
         <div class="admin-toolbar__actions">
           <router-link class="button button--ghost" to="/workspace">返回工作台</router-link>
+          <button class="button" type="button" @click="openCreateModal">新增用户</button>
         </div>
       </section>
 
-      <section class="user-layout">
-        <section class="admin-panel">
-          <div class="admin-panel__heading">
-            <p class="eyebrow">{{ isEditMode ? '编辑用户' : '新增用户' }}</p>
-            <h2>{{ isEditMode ? '修改账号信息' : '创建新账号' }}</h2>
-            <p>
-              {{
-                isEditMode
-                  ? '可编辑角色和启用状态；本地用户可重置密码，AD 用户账号信息由域控同步。'
-                  : '管理员只能手工创建本地账号，AD 用户会在首次登录时自动建档。'
-              }}
-            </p>
-          </div>
+      <section class="admin-panel">
+        <div class="admin-panel__heading">
+          <p class="eyebrow">用户列表</p>
+          <h2>全部账号</h2>
+          <p>管理员可以编辑用户信息、停启账号和重置密码。</p>
+        </div>
 
-          <form class="form-card" @submit.prevent="handleSubmit">
-            <label class="field">
-              <span>用户名</span>
-              <input v-model="form.username" class="text-input" type="text" :disabled="isEditingAdUser" />
-            </label>
-            <p v-if="isEditingAdUser" class="feedback">AD 用户名由域账号映射，不支持手动修改。</p>
-            <label v-if="!isEditMode" class="field">
-              <span>初始密码</span>
-              <input v-model="form.password" class="text-input" type="password" />
-            </label>
-            <label class="field">
-              <span>角色</span>
-              <select v-model="form.role" class="text-input">
-                <option value="USER">普通用户</option>
-                <option value="ADMIN">管理员</option>
-              </select>
-            </label>
-            <label class="field field--inline">
-              <input v-model="form.is_active" type="checkbox" />
-              <span>启用账号</span>
-            </label>
-            <p v-if="error" class="feedback feedback--error">{{ error }}</p>
-            <div class="form-actions">
-              <button class="button" :disabled="submitting" type="submit">{{ submitLabel }}</button>
-              <button class="button button--ghost" type="button" @click="resetForm">清空</button>
+        <div class="user-management__controls">
+          <label class="search-field search-field--admin user-management__search" for="user-search">
+            <div class="search-field__meta">
+              <span class="search-field__label">搜索用户名或姓名</span>
+              <span class="search-field__status">{{ resultsSummary }}</span>
             </div>
-          </form>
-        </section>
+            <div class="search-field__control">
+              <span class="search-field__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M21 21l-4.35-4.35m1.85-5.15a7 7 0 11-14 0 7 7 0 0114 0z"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                  />
+                </svg>
+              </span>
+              <input
+                id="user-search"
+                v-model.trim="search"
+                class="text-input"
+                type="search"
+                placeholder="例如：admin、alice、张三"
+              />
+              <button v-if="search" class="search-field__clear" type="button" @click="search = ''">清空</button>
+            </div>
+          </label>
+        </div>
 
-        <section class="admin-panel">
-          <div class="admin-panel__heading">
-            <p class="eyebrow">用户列表</p>
-            <h2>全部账号</h2>
-            <p>管理员可以编辑用户信息、停启账号和重置密码。</p>
-          </div>
-          <section v-if="loading" class="feedback">正在加载用户列表...</section>
-          <section v-else-if="!users.length" class="feedback">当前还没有用户。</section>
-          <section v-else class="admin-table-wrap admin-table-wrap--embedded">
-            <table class="admin-table">
+        <section v-if="actionError" class="feedback feedback--error">{{ actionError }}</section>
+        <section v-if="listError" class="feedback feedback--error">{{ listError }}</section>
+        <section v-else-if="loading && !users.length" class="feedback">正在加载用户列表...</section>
+        <section v-else-if="!users.length" class="feedback">{{ emptyStateText }}</section>
+        <template v-else>
+          <section class="admin-table-wrap">
+            <table class="admin-table admin-table--users">
               <thead>
                 <tr>
                   <th scope="col">用户名</th>
@@ -275,8 +429,49 @@ function formatSource(source) {
               </tbody>
             </table>
           </section>
-        </section>
+
+          <div ref="userSentinel" class="user-management__sentinel" aria-hidden="true"></div>
+
+          <section v-if="loadMoreError" class="feedback feedback--error user-management__load-more">
+            <span>{{ loadMoreError }}</span>
+            <button class="button button--ghost" type="button" @click="loadMoreUsers">重试加载</button>
+          </section>
+          <section v-else-if="loadingMore" class="feedback user-management__load-more">正在加载更多用户...</section>
+          <p v-else class="user-management__footer">
+            {{ hasMore ? '继续向下滚动以加载更多用户' : `已加载全部 ${total} 个用户` }}
+          </p>
+        </template>
       </section>
     </main>
+
+    <InfoModal :open="isUserModalOpen" :title="modalTitle" :summary="modalSummary" width="720px" @close="closeUserModal">
+      <form class="form-card form-card--modal" @submit.prevent="handleSubmit">
+        <label class="field">
+          <span>用户名</span>
+          <input v-model="form.username" class="text-input" type="text" :disabled="isEditingAdUser" />
+        </label>
+        <p v-if="isEditingAdUser" class="feedback feedback--inline">AD 用户名由域账号映射，不支持手动修改。</p>
+        <label v-if="!isEditMode" class="field">
+          <span>初始密码</span>
+          <input v-model="form.password" class="text-input" type="password" />
+        </label>
+        <label class="field">
+          <span>角色</span>
+          <select v-model="form.role" class="text-input">
+            <option value="USER">普通用户</option>
+            <option value="ADMIN">管理员</option>
+          </select>
+        </label>
+        <label class="field field--inline">
+          <input v-model="form.is_active" type="checkbox" />
+          <span>启用账号</span>
+        </label>
+        <p v-if="formError" class="feedback feedback--error feedback--inline">{{ formError }}</p>
+        <div class="form-actions">
+          <button class="button" :disabled="submitting" type="submit">{{ submitLabel }}</button>
+          <button class="button button--ghost" type="button" @click="closeUserModal">取消</button>
+        </div>
+      </form>
+    </InfoModal>
   </div>
 </template>

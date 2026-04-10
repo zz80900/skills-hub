@@ -17,6 +17,14 @@ class UserSummary(BaseModel):
     updated_at: datetime
 
 
+class UserListResponse(BaseModel):
+    items: list[UserSummary]
+    page: int
+    page_size: int
+    total: int
+    has_more: bool
+
+
 class UserCreateRequest(BaseModel):
     username: str
     password: str = ""

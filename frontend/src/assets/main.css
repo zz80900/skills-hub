@@ -1122,6 +1122,10 @@ pre {
   justify-content: flex-start;
 }
 
+.admin-table--users {
+  min-width: 940px;
+}
+
 .admin-search {
   margin-top: 20px;
   padding: 24px;
@@ -1167,6 +1171,10 @@ pre {
   background: transparent;
   display: grid;
   gap: 18px;
+}
+
+.form-card--modal {
+  margin-top: 0;
 }
 
 .field {
@@ -1216,6 +1224,41 @@ small {
 .user-table__title {
   display: grid;
   gap: 4px;
+}
+
+.user-management__controls {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.user-management__search {
+  margin: 0;
+}
+
+.user-management__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.user-management__sentinel {
+  height: 1px;
+}
+
+.user-management__load-more {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.user-management__footer {
+  margin: 16px 0 0;
+  color: var(--text-soft);
+  text-align: center;
 }
 
 @media (max-width: 980px) {
@@ -1307,6 +1350,8 @@ small {
   .admin-toolbar__actions,
   .admin-list__actions,
   .admin-table__actions,
+  .user-management__actions,
+  .user-management__load-more,
   .form-actions {
     flex-direction: column;
   }

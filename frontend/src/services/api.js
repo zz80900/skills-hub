@@ -245,8 +245,14 @@ export function deleteSkill(name) {
   })
 }
 
-export async function fetchUsers() {
-  return await request(buildUrl('/api/admin/users'))
+export async function fetchUsers(query, options = {}) {
+  return await request(
+    buildUrl('/api/admin/users', {
+      q: query,
+      page: options.page,
+      page_size: options.pageSize,
+    }),
+  )
 }
 
 export async function createUser(payload) {
