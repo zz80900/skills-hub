@@ -69,7 +69,6 @@ onBeforeUnmount(() => {
 
           <div class="detail-modal__header">
             <div>
-              <p class="eyebrow">快捷信息</p>
               <h2>{{ title }}</h2>
             </div>
             <p v-if="summary" class="detail-modal__summary">{{ summary }}</p>

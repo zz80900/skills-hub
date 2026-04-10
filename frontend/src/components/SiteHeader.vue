@@ -33,7 +33,7 @@ const infoModalTitle = computed(() => (activeInfoTab.value === 'cli' ? '安装 C
 const infoModalSummary = computed(() =>
   activeInfoTab.value === 'cli'
     ? '先安装 nexgo-skills CLI，再通过首页复制具体 Skill 安装命令。'
-    : '教程与安装入口已固定在顶部导航，登录前后都可以随时打开。',
+    : ' ',
 )
 const userBadge = computed(() => {
   if (!authState.user) {
@@ -136,10 +136,10 @@ onMounted(() => {
     @close="closeInfoModal"
   >
     <ol v-if="activeInfoTab === 'guide'" class="info-modal__list">
-        <li>本 CLI 依赖 Node.js 18 及以上版本，请先<a href="https://nodejs.org/en/download/" target="_blank">下载</a>并安装。</li>
-        <li>点击“安装 CLI”，复制 nexgo-skills CLI 安装命令，并在终端中执行。</li>
-        <li>选择您需要的 Skill，点击卡片查看详情；随后在终端执行相应的 Skill 安装命令即可（支持多种主流 AI IDE）。</li>
-        <li>登录工作台后，您还可以上传并分享自己开发的 Skill。</li>
+      <li>1. 本 CLI 依赖 Node.js 18 及以上版本，请先<a href="https://nodejs.org/en/download/" target="_blank">下载</a>并安装。</li>
+      <li>2. 点击“安装 CLI”，复制 nexgo-skills CLI 安装命令到终端执行。</li>
+      <li>3. 选择您需要的 Skill，点击卡片查看详情；随后在终端执行相应的 Skill 安装命令即可（支持多种主流 AI IDE）。</li>
+      <li>4. 登录工作台后，您还可以上传并分享自己开发的 Skill。</li>
     </ol>
     <CommandSnippet
       v-else-if="activeInfoTab === 'cli' && cliInstallCommand"
