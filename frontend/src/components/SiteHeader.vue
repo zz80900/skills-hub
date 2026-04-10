@@ -136,7 +136,7 @@ onMounted(() => {
     @close="closeInfoModal"
   >
     <ol v-if="activeInfoTab === 'guide'" class="info-modal__list">
-      <li>本 CLI 依赖 Node.js 18 及以上版本，请先<a href="https://nodejs.org/en/download/" target="_blank">下载</a>并安装。</li>
+      <li>本 CLI 依赖 Node.js 18 及以上版本，请先<a href="https://nodejs.org/en/download/" target="_blank"><b>下载</b></a>并安装。</li>
       <li>点击“安装 CLI”，复制 nexgo-skills CLI 安装命令到终端执行。</li>
       <li>选择您需要的 Skill，点击卡片查看详情；随后在终端执行相应的 Skill 安装命令即可（支持多种主流 AI IDE）。</li>
       <li>登录工作台后，您还可以上传并分享自己开发的 Skill。</li>
