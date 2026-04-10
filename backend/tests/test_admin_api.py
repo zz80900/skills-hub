@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 
 from app.api import public as public_api
 from app.db.base import Base
-from app.db.schema import ensure_schema_compatibility
+from app.db.schema import _ensure_postgresql_skill_name_uniqueness_policy, ensure_schema_compatibility
 from app.db.session import engine
 from app.main import app
 from app.services import user_service
@@ -939,6 +939,67 @@ def test_schema_compatibility_replaces_legacy_sqlite_unique_name_index():
         legacy_engine.dispose()
         if legacy_db.exists():
             legacy_db.unlink()
+
+
+def test_schema_compatibility_replaces_legacy_postgresql_unique_name_index():
+    executed_sql: list[str] = []
+
+    class FakeScalarResult:
+        def __init__(self, values):
+            self._values = values
+
+        def scalars(self):
+            return iter(self._values)
+
+    class FakeMappingResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return iter(self._rows)
+
+    class FakeConnection:
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            executed_sql.append(sql)
+            if "FROM pg_constraint con" in sql:
+                return FakeScalarResult(["skills_name_key"])
+            if "FROM pg_indexes" in sql:
+                return FakeMappingResult(
+                    [
+                        {
+                            "indexname": "ix_skills_name",
+                            "indexdef": "CREATE UNIQUE INDEX ix_skills_name ON public.skills USING btree (name)",
+                        },
+                        {
+                            "indexname": "uq_skills_active_name",
+                            "indexdef": (
+                                "CREATE UNIQUE INDEX uq_skills_active_name ON public.skills USING btree (name) "
+                                "WHERE (deleted_at IS NULL)"
+                            ),
+                        },
+                    ]
+                )
+            return FakeScalarResult([])
+
+    class FakeBegin:
+        def __enter__(self):
+            return FakeConnection()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeEngine:
+        def begin(self):
+            return FakeBegin()
+
+    _ensure_postgresql_skill_name_uniqueness_policy(FakeEngine())
+
+    assert any('ALTER TABLE skills DROP CONSTRAINT "skills_name_key"' in sql for sql in executed_sql)
+    assert any('DROP INDEX IF EXISTS "ix_skills_name"' in sql for sql in executed_sql)
+    assert not any('DROP INDEX IF EXISTS "uq_skills_active_name"' in sql for sql in executed_sql)
+    assert any("CREATE UNIQUE INDEX IF NOT EXISTS uq_skills_active_name" in sql for sql in executed_sql)
+    assert any("CREATE INDEX IF NOT EXISTS ix_skills_name ON skills (name)" in sql for sql in executed_sql)
 
 
 def test_public_skills_groups_local_and_remote_results(client: TestClient, monkeypatch):

@@ -382,7 +382,26 @@ def _ensure_postgresql_skill_name_uniqueness_policy(engine: Engine) -> None:
             )
         ).scalars()
         for constraint_name in constraint_rows:
-            connection.execute(text(f'ALTER TABLE skills DROP CONSTRAINT "{constraint_name}"'))
+            connection.execute(
+                text(f"ALTER TABLE skills DROP CONSTRAINT {_quote_postgresql_identifier(constraint_name)}")
+            )
+
+        index_rows = connection.execute(
+            text(
+                """
+                SELECT indexname, indexdef
+                FROM pg_indexes
+                WHERE schemaname = current_schema()
+                  AND tablename = 'skills'
+                """
+            )
+        ).mappings()
+        for row in index_rows:
+            index_name = row["indexname"]
+            index_definition = row["indexdef"]
+            if not _postgresql_is_legacy_global_unique_skill_name_index(index_definition):
+                continue
+            connection.execute(text(f"DROP INDEX IF EXISTS {_quote_postgresql_identifier(index_name)}"))
 
         connection.execute(
             text(
@@ -393,3 +412,20 @@ def _ensure_postgresql_skill_name_uniqueness_policy(engine: Engine) -> None:
                 """
             )
         )
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_name ON skills (name)"))
+
+
+def _postgresql_is_legacy_global_unique_skill_name_index(index_sql: str | None) -> bool:
+    if not index_sql:
+        return False
+    normalized_sql = re.sub(r"\s+", " ", index_sql.upper())
+    if "CREATE UNIQUE INDEX" not in normalized_sql:
+        return False
+    if not re.search(r"\(\s*\"?NAME\"?\s*\)", normalized_sql):
+        return False
+    return not re.search(r"WHERE\s+\(?\s*\"?DELETED_AT\"?\s+IS\s+NULL\s*\)?", normalized_sql)
+
+
+def _quote_postgresql_identifier(identifier: str) -> str:
+    escaped = identifier.replace('"', '""')
+    return f'"{escaped}"'
