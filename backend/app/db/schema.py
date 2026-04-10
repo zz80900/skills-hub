@@ -230,6 +230,8 @@ def _ensure_sqlite_skill_name_uniqueness_policy(engine: Engine) -> None:
     if table_sql and _sqlite_table_has_global_unique_name(table_sql):
         _rebuild_sqlite_skills_table_without_global_unique_name(engine)
 
+    _drop_sqlite_global_unique_skill_name_indexes(engine)
+
     with engine.begin() as connection:
         connection.execute(
             text(
@@ -240,6 +242,7 @@ def _ensure_sqlite_skill_name_uniqueness_policy(engine: Engine) -> None:
                 """
             )
         )
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_name ON skills (name)"))
 
 
 def _get_sqlite_table_sql(engine: Engine, table_name: str) -> str | None:
@@ -256,6 +259,45 @@ def _sqlite_table_has_global_unique_name(table_sql: str) -> bool:
         re.search(r"\bNAME\b.*?\bUNIQUE\b", normalized_sql)
         or re.search(r"\bUNIQUE\s*\(\s*NAME\s*\)", normalized_sql)
     )
+
+
+def _drop_sqlite_global_unique_skill_name_indexes(engine: Engine) -> None:
+    with engine.begin() as connection:
+        index_rows = connection.execute(text("PRAGMA index_list('skills')")).mappings().all()
+        for row in index_rows:
+            if not row["unique"]:
+                continue
+
+            index_name = row["name"]
+            if not index_name or str(index_name).startswith("sqlite_autoindex_"):
+                continue
+
+            index_columns = connection.execute(
+                text(f"PRAGMA index_info({_quote_sqlite_identifier(index_name)})")
+            ).mappings().all()
+            if [column["name"] for column in index_columns] != ["name"]:
+                continue
+
+            index_sql = connection.execute(
+                text("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = :name"),
+                {"name": index_name},
+            ).scalar()
+            if _sqlite_is_active_name_unique_index(index_sql):
+                continue
+
+            connection.execute(text(f"DROP INDEX IF EXISTS {_quote_sqlite_identifier(index_name)}"))
+
+
+def _sqlite_is_active_name_unique_index(index_sql: str | None) -> bool:
+    if not index_sql:
+        return False
+    normalized_sql = re.sub(r"\s+", " ", index_sql.upper())
+    return "ON SKILLS (NAME)" in normalized_sql and "WHERE DELETED_AT IS NULL" in normalized_sql
+
+
+def _quote_sqlite_identifier(identifier: str) -> str:
+    escaped = identifier.replace('"', '""')
+    return f'"{escaped}"'
 
 
 def _rebuild_sqlite_skills_table_without_global_unique_name(engine: Engine) -> None:

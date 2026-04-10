@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -784,6 +784,161 @@ def test_schema_compatibility_adds_access_control_and_backfills_owner():
                 ),
                 {"owner_id": admin_row["id"]},
             )
+
+
+def test_schema_compatibility_replaces_legacy_sqlite_unique_name_index():
+    legacy_db = Path(__file__).with_name("legacy-name-index.db")
+    if legacy_db.exists():
+        legacy_db.unlink()
+
+    legacy_engine = create_engine(f"sqlite:///{legacy_db.as_posix()}", connect_args={"check_same_thread": False})
+    try:
+        with legacy_engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE skills (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        name VARCHAR(64) NOT NULL,
+                        description_markdown TEXT NOT NULL DEFAULT '',
+                        description_html TEXT NOT NULL DEFAULT '',
+                        package_url VARCHAR(512) NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE UNIQUE INDEX ix_skills_name ON skills (name)"))
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO skills (
+                        id,
+                        name,
+                        description_markdown,
+                        description_html,
+                        package_url
+                    ) VALUES (
+                        1,
+                        'legacy-index-skill',
+                        'legacy markdown',
+                        '<p>legacy markdown</p>',
+                        'http://example.invalid/legacy-index-skill.zip'
+                    )
+                    """
+                )
+            )
+
+        ensure_schema_compatibility(legacy_engine)
+
+        with legacy_engine.begin() as connection:
+            admin_row = connection.execute(text("SELECT id FROM users WHERE username = 'admin'")).mappings().one()
+            index_rows = connection.execute(text("PRAGMA index_list('skills')")).mappings().all()
+            index_map = {row["name"]: row for row in index_rows}
+
+            assert "uq_skills_active_name" in index_map
+            assert index_map["uq_skills_active_name"]["unique"] == 1
+            assert index_map["uq_skills_active_name"]["partial"] == 1
+            assert "ix_skills_name" in index_map
+            assert index_map["ix_skills_name"]["unique"] == 0
+
+            connection.execute(
+                text(
+                    """
+                    UPDATE skills
+                    SET deleted_at = CURRENT_TIMESTAMP
+                    WHERE id = 1
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO skills (
+                        id,
+                        name,
+                        owner_id,
+                        description_markdown,
+                        description_html,
+                        contributor,
+                        package_url,
+                        current_version,
+                        deleted_at
+                    ) VALUES (
+                        2,
+                        'legacy-index-skill',
+                        :owner_id,
+                        'deleted history',
+                        '<p>deleted history</p>',
+                        'admin',
+                        'http://example.invalid/legacy-index-skill-history.zip',
+                        '1.0.0',
+                        CURRENT_TIMESTAMP
+                    )
+                    """
+                ),
+                {"owner_id": admin_row["id"]},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO skills (
+                        id,
+                        name,
+                        owner_id,
+                        description_markdown,
+                        description_html,
+                        contributor,
+                        package_url,
+                        current_version
+                    ) VALUES (
+                        3,
+                        'legacy-index-skill',
+                        :owner_id,
+                        'active legacy skill',
+                        '<p>active legacy skill</p>',
+                        'admin',
+                        'http://example.invalid/legacy-index-skill-active.zip',
+                        '1.0.0'
+                    )
+                    """
+                ),
+                {"owner_id": admin_row["id"]},
+            )
+
+        with pytest.raises(IntegrityError):
+            with legacy_engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO skills (
+                            id,
+                            name,
+                            owner_id,
+                            description_markdown,
+                            description_html,
+                            contributor,
+                            package_url,
+                            current_version
+                        ) VALUES (
+                            4,
+                            'legacy-index-skill',
+                            :owner_id,
+                            'duplicate active legacy skill',
+                            '<p>duplicate active legacy skill</p>',
+                            'admin',
+                            'http://example.invalid/legacy-index-skill-active-duplicate.zip',
+                            '1.0.0'
+                        )
+                        """
+                    ),
+                    {"owner_id": admin_row["id"]},
+                )
+    finally:
+        legacy_engine.dispose()
+        if legacy_db.exists():
+            legacy_db.unlink()
 
 
 def test_public_skills_groups_local_and_remote_results(client: TestClient, monkeypatch):
