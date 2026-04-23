@@ -124,6 +124,11 @@ watch(
             <span>上传者</span>
             <code>{{ skill.contributor || '未填写' }}</code>
           </div>
+          <div class="detail-meta__item">
+            <span>可见范围</span>
+            <code>{{ skill.group_name ? `组内 · ${skill.group_name}` : '公开' }}</code>
+            <small>{{ skill.group_name ? '仅该组成员和管理员可在首页查看' : '所有访客都可在首页查看' }}</small>
+          </div>
           <div v-if="isAdmin" class="detail-meta__item">
             <span>归属用户</span>
             <code>{{ skill.owner_username || '-' }}</code>

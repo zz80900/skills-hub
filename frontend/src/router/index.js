@@ -5,7 +5,6 @@ import DashboardView from '../views/admin/DashboardView.vue'
 import LoginView from '../views/admin/LoginView.vue'
 import SkillDetailView from '../views/admin/SkillDetailView.vue'
 import SkillFormView from '../views/admin/SkillFormView.vue'
-import UserManagementView from '../views/admin/UserManagementView.vue'
 import HomeView from '../views/public/HomeView.vue'
 
 const router = createRouter({
@@ -40,13 +39,19 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/workspace/groups',
+      name: 'workspace-groups',
+      redirect: { name: 'workspace-dashboard', query: { tab: 'groups' } },
+    },
+    {
       path: '/workspace/users',
       name: 'workspace-users',
-      component: UserManagementView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      redirect: { name: 'workspace-dashboard', query: { tab: 'users' } },
     },
     { path: '/admin/login', redirect: '/login' },
     { path: '/admin', redirect: '/workspace' },
+    { path: '/admin/groups', redirect: '/workspace/groups' },
+    { path: '/admin/users', redirect: '/workspace/users' },
     { path: '/admin/skills/new', redirect: '/workspace/skills/new' },
     { path: '/admin/skills/:name/edit', redirect: (to) => `/workspace/skills/${to.params.name}/edit` },
     { path: '/admin/skills/:name', redirect: (to) => `/workspace/skills/${to.params.name}` },

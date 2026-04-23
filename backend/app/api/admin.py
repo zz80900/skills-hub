@@ -6,7 +6,10 @@ from app.core.config import get_settings
 from app.core.encryption import DecryptionError, decrypt_and_validate
 from app.core.rsa import get_challenge_store, get_key_manager
 from app.models.user import User
+from app.schemas.auth import MessageResponse
+from app.schemas.group import GroupCreateRequest, GroupSummary, GroupUpdateRequest
 from app.schemas.user import UserCreateRequest, UserListResponse, UserPasswordResetRequest, UserSummary, UserUpdateRequest
+from app.services.group_service import UNSET, create_group, delete_group, get_group_by_id, list_groups, to_group_summary, update_group
 from app.services.user_service import (
     create_user,
     get_user_by_id,
@@ -56,6 +59,64 @@ def list_admin_users(
         total=total,
         has_more=page * page_size < total,
     )
+
+
+@router.get("/groups", response_model=list[GroupSummary])
+def list_admin_groups(
+    session: DbSession,
+    _: User = Depends(require_admin),
+):
+    return [GroupSummary.model_validate(to_group_summary(group)) for group in list_groups(session)]
+
+
+@router.post("/groups", response_model=GroupSummary, status_code=status.HTTP_201_CREATED)
+def create_admin_group(
+    payload: GroupCreateRequest,
+    session: DbSession,
+    _: User = Depends(require_admin),
+):
+    group = create_group(
+        session,
+        name=payload.name,
+        description=payload.description,
+        leader_user_id=payload.leader_user_id,
+    )
+    return GroupSummary.model_validate(to_group_summary(group))
+
+
+@router.put("/groups/{group_id}", response_model=GroupSummary)
+def update_admin_group(
+    group_id: int,
+    payload: GroupUpdateRequest,
+    session: DbSession,
+    _: User = Depends(require_admin),
+):
+    group = get_group_by_id(session, group_id)
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户组不存在")
+
+    provided_fields = payload.model_fields_set
+    group = update_group(
+        session,
+        group,
+        name=payload.name if "name" in provided_fields else UNSET,
+        description=payload.description if "description" in provided_fields else UNSET,
+        leader_user_id=payload.leader_user_id if "leader_user_id" in provided_fields else UNSET,
+    )
+    return GroupSummary.model_validate(to_group_summary(group))
+
+
+@router.delete("/groups/{group_id}", response_model=MessageResponse)
+def delete_admin_group(
+    group_id: int,
+    session: DbSession,
+    _: User = Depends(require_admin),
+):
+    group = get_group_by_id(session, group_id)
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户组不存在")
+    delete_group(session, group)
+    return MessageResponse(message="用户组已删除")
 
 
 @router.post("/users", response_model=UserSummary, status_code=status.HTTP_201_CREATED)

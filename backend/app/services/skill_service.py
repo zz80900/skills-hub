@@ -8,8 +8,10 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
+from app.models.group import Group, GroupMembership
 from app.models.skill import Skill, SkillVersion
 from app.models.user import User
+from app.services.group_service import resolve_group_for_skill_binding
 from app.services.markdown import render_markdown
 from app.services.nexus import build_package_url
 from app.services.user_service import ROLE_ADMIN
@@ -176,13 +178,31 @@ def _apply_skill_query_filters(statement, query: str | None):
     return statement
 
 
-def search_public_skills(session: Session, query: str | None = None) -> list[Skill]:
+def _apply_public_skill_visibility_filter(statement, actor: User | None):
+    if actor is None:
+        return statement.where(Skill.group_id.is_(None))
+    if actor.role.name == ROLE_ADMIN:
+        return statement
+
+    membership_exists = (
+        select(GroupMembership.id)
+        .where(
+            GroupMembership.group_id == Skill.group_id,
+            GroupMembership.user_id == actor.id,
+        )
+        .exists()
+    )
+    return statement.where(or_(Skill.group_id.is_(None), membership_exists))
+
+
+def search_public_skills(session: Session, query: str | None = None, actor: User | None = None) -> list[Skill]:
     statement = (
         select(Skill)
         .where(Skill.deleted_at.is_(None))
         .order_by(Skill.updated_at.desc(), Skill.id.desc())
     )
     statement = _apply_skill_query_filters(statement, query)
+    statement = _apply_public_skill_visibility_filter(statement, actor)
     return list(session.scalars(statement))
 
 
@@ -200,6 +220,16 @@ def get_skill_by_name(session: Session, name: str, include_deleted: bool = False
         statement = statement.where(Skill.deleted_at.is_(None)).order_by(Skill.id.desc())
     else:
         statement = statement.order_by(*_skill_name_resolution_order())
+    return session.scalars(statement).first()
+
+
+def get_public_skill_by_name(session: Session, name: str, actor: User | None = None) -> Skill | None:
+    statement = (
+        select(Skill)
+        .where(Skill.name == name, Skill.deleted_at.is_(None))
+        .order_by(Skill.id.desc())
+    )
+    statement = _apply_public_skill_visibility_filter(statement, actor)
     return session.scalars(statement).first()
 
 
@@ -254,6 +284,7 @@ def create_skill(
     name: str,
     description_markdown: str,
     package_url: str,
+    group: Group | None = None,
 ) -> Skill:
     contributor = (owner.display_name or owner.username).strip() or None
     description_html = render_markdown(description_markdown)
@@ -265,6 +296,7 @@ def create_skill(
         contributor=contributor,
         package_url=package_url,
         current_version=INITIAL_SKILL_VERSION,
+        group_id=group.id if group is not None else None,
     )
     session.add(skill)
     session.flush()
@@ -288,6 +320,7 @@ def update_skill(
     skill: Skill,
     description_markdown: str,
     package_url: str | None,
+    group: Group | None,
 ) -> Skill:
     next_version = get_next_version(skill.current_version)
     next_package_url = package_url or skill.package_url
@@ -297,6 +330,7 @@ def update_skill(
     skill.description_html = description_html
     skill.package_url = next_package_url
     skill.current_version = next_version
+    skill.group_id = group.id if group is not None else None
 
     session.add(skill)
     session.flush()
@@ -326,6 +360,8 @@ def to_skill_summary(skill: Skill) -> dict[str, Any]:
         "id": skill.id,
         "name": skill.name,
         "owner_username": skill.owner.username,
+        "group_id": skill.group_id,
+        "group_name": skill.group.name if skill.group is not None else None,
         "current_version": skill.current_version,
         "contributor": skill.contributor,
         "description_html": skill.description_html,
@@ -404,3 +440,7 @@ def to_public_skill_version_detail(
 
 def default_package_url(skill_name: str) -> str:
     return build_package_url(skill_name)
+
+
+def resolve_skill_group(session: Session, actor: User, group_id: int | None) -> Group | None:
+    return resolve_group_for_skill_binding(session, actor, group_id)

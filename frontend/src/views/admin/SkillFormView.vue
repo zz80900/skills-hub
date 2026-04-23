@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
-import { authState, createSkill, fetchWorkspaceSkill, updateSkill } from '../../services/api'
+import { authState, createSkill, fetchGroupOptions, fetchWorkspaceSkill, updateSkill } from '../../services/api'
 
 const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const route = useRoute()
@@ -16,10 +16,14 @@ const error = ref('')
 const selectedFileName = ref('')
 const currentVersion = ref('')
 const showZipGuidance = ref(false)
+const groupOptionsLoading = ref(false)
+const groupOptionsError = ref('')
+const groupOptions = ref([])
 const form = reactive({
   name: '',
   contributor: '',
   description_markdown: '',
+  group_id: '',
   zip_file: null,
 })
 
@@ -47,6 +51,30 @@ function validateSkillName(name) {
   return normalizedName
 }
 
+function mergeGroupOption(option) {
+  if (!option || option.id == null) {
+    return
+  }
+  if (groupOptions.value.some((item) => item.id === option.id)) {
+    return
+  }
+  groupOptions.value = [...groupOptions.value, option]
+}
+
+async function loadGroupOptions() {
+  groupOptionsLoading.value = true
+  groupOptionsError.value = ''
+  try {
+    const existingOptions = [...groupOptions.value]
+    groupOptions.value = await fetchGroupOptions()
+    existingOptions.forEach(mergeGroupOption)
+  } catch (err) {
+    groupOptionsError.value = err.message
+  } finally {
+    groupOptionsLoading.value = false
+  }
+}
+
 async function loadSkill() {
   if (!isEditMode.value) {
     return
@@ -58,7 +86,17 @@ async function loadSkill() {
     form.name = skill.name
     form.contributor = skill.contributor || ''
     form.description_markdown = skill.description_markdown
+    form.group_id = skill.group_id ? String(skill.group_id) : ''
     currentVersion.value = skill.current_version
+    if (skill.group_id) {
+      mergeGroupOption({
+        id: skill.group_id,
+        name: skill.group_name || `组 #${skill.group_id}`,
+        description: null,
+        leader_user_id: null,
+        leader_username: '',
+      })
+    }
   } catch (err) {
     error.value = err.message
   } finally {
@@ -72,6 +110,7 @@ async function handleSubmit() {
   try {
     const payload = new FormData()
     payload.append('description_markdown', form.description_markdown)
+    payload.append('group_id', form.group_id || '')
     const validatedName = validateSkillName(form.name)
 
     if (isEditMode.value) {
@@ -97,6 +136,7 @@ async function handleSubmit() {
 }
 
 onMounted(() => {
+  loadGroupOptions()
   loadSkill()
 })
 </script>
@@ -148,6 +188,22 @@ onMounted(() => {
               rows="12"
               placeholder="请输入 Skill 描述，支持 Markdown"
             />
+          </label>
+
+          <label class="field">
+            <span>归属组</span>
+            <select v-model="form.group_id" class="text-input" :disabled="groupOptionsLoading">
+              <option value="">公开（不绑定组）</option>
+              <option v-for="group in groupOptions" :key="group.id" :value="String(group.id)">
+                {{ group.name }}
+              </option>
+            </select>
+            <small class="field__hint">
+              {{ form.group_id ? '绑定组后，仅该组成员和管理员可在首页查看。' : '不绑定组时，Skill 会继续公开展示。' }}
+            </small>
+            <small v-if="groupOptionsLoading">正在加载可选组...</small>
+            <small v-else-if="groupOptionsError" class="feedback feedback--error feedback--inline">{{ groupOptionsError }}</small>
+            <small v-else-if="!groupOptions.length">当前没有可选组，可继续创建公开 Skill。</small>
           </label>
 
           <div class="field">

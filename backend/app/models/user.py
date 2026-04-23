@@ -56,3 +56,8 @@ class User(Base):
 
     role: Mapped[Role] = relationship(back_populates="users", lazy="joined")
     skills: Mapped[list["Skill"]] = relationship(back_populates="owner")
+    led_groups: Mapped[list["Group"]] = relationship(
+        back_populates="leader",
+        foreign_keys="Group.leader_user_id",
+    )
+    group_memberships: Mapped[list["GroupMembership"]] = relationship(back_populates="user")

@@ -95,12 +95,81 @@ def user_list_items(payload: dict) -> list[dict]:
     return payload["items"]
 
 
+def create_group_record(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    *,
+    name: str,
+    leader_user_id: int,
+    description: str | None = None,
+):
+    response = client.post(
+        "/api/admin/groups",
+        headers=admin_headers,
+        json={
+            "name": name,
+            "description": description,
+            "leader_user_id": leader_user_id,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def replace_group_member_list(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    group_id: int,
+    user_ids: list[int],
+):
+    response = client.put(
+        f"/api/workspace/groups/{group_id}/members",
+        headers=headers,
+        json={"user_ids": user_ids},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def add_group_member_record(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    group_id: int,
+    user_id: int,
+):
+    response = client.post(
+        f"/api/workspace/groups/{group_id}/members",
+        headers=headers,
+        json={"user_id": user_id},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def remove_group_member_record(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    group_id: int,
+    user_id: int,
+):
+    response = client.delete(
+        f"/api/workspace/groups/{group_id}/members/{user_id}",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
 def create_local_skill(
     client: TestClient,
     monkeypatch,
     headers: dict[str, str],
     name: str = "demo-skill",
     description_markdown: str = "local detail",
+    group_id: int | None = None,
 ):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
@@ -111,7 +180,11 @@ def create_local_skill(
         "/api/workspace/skills",
         headers=headers,
         files={"zip_file": (f"{name}.zip", make_zip("# skill"), "application/zip")},
-        data={"name": name, "description_markdown": description_markdown},
+        data={
+            "name": name,
+            "description_markdown": description_markdown,
+            **({"group_id": str(group_id)} if group_id is not None else {}),
+        },
     )
     assert response.status_code == 201
     return response
@@ -386,6 +459,302 @@ def test_admin_user_list_supports_search_and_pagination(client: TestClient):
     assert [item["username"] for item in user_list_items(search_by_display_name_payload)] == ["alice"]
 
 
+def test_admin_group_management_and_leader_membership(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+
+    group = create_group_record(
+        client,
+        admin_headers,
+        name="PLM 组",
+        description="负责 PLM 相关 Skill",
+        leader_user_id=alice["id"],
+    )
+    assert group["leader_username"] == "alice"
+    assert group["member_count"] == 1
+    assert [member["username"] for member in group["members"]] == ["alice"]
+
+    update_response = client.put(
+        f"/api/admin/groups/{group['id']}",
+        headers=admin_headers,
+        json={
+            "name": "平台组",
+            "description": "负责平台类 Skill",
+            "leader_user_id": bob["id"],
+        },
+    )
+    assert update_response.status_code == 200
+    updated_group = update_response.json()
+    assert updated_group["name"] == "平台组"
+    assert updated_group["leader_username"] == "bob"
+    assert {member["username"] for member in updated_group["members"]} == {"alice", "bob"}
+
+    list_response = client.get("/api/admin/groups", headers=admin_headers)
+    assert list_response.status_code == 200
+    assert [item["name"] for item in list_response.json()] == ["平台组"]
+
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+    workspace_groups = client.get("/api/workspace/groups", headers=bob_headers)
+    assert workspace_groups.status_code == 200
+    assert [item["name"] for item in workspace_groups.json()] == ["平台组"]
+
+
+def test_group_member_management_permissions_and_multi_group_membership(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    charlie = create_user_account(client, admin_headers, "charlie", "charlie-pass")
+
+    group_alpha = create_group_record(client, admin_headers, name="Alpha 组", leader_user_id=alice["id"])
+    group_beta = create_group_record(client, admin_headers, name="Beta 组", leader_user_id=alice["id"])
+
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    alpha_members = replace_group_member_list(
+        client,
+        alice_headers,
+        group_id=group_alpha["id"],
+        user_ids=[alice["id"], bob["id"]],
+    )
+    assert {member["username"] for member in alpha_members["members"]} == {"alice", "bob"}
+
+    beta_members = replace_group_member_list(
+        client,
+        alice_headers,
+        group_id=group_beta["id"],
+        user_ids=[alice["id"], bob["id"], charlie["id"]],
+    )
+    assert {member["username"] for member in beta_members["members"]} == {"alice", "bob", "charlie"}
+
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+    options_response = client.get("/api/workspace/groups/options", headers=bob_headers)
+    assert options_response.status_code == 200
+    assert {item["name"] for item in options_response.json()} == {"Alpha 组", "Beta 组"}
+
+    member_options_response = client.get("/api/workspace/groups/member-options", headers=alice_headers)
+    assert member_options_response.status_code == 200
+    assert {"admin", "alice", "bob", "charlie"}.issubset({item["username"] for item in member_options_response.json()})
+
+    forbidden_update = client.put(
+        f"/api/workspace/groups/{group_alpha['id']}/members",
+        headers=bob_headers,
+        json={"user_ids": [alice["id"], bob["id"], charlie["id"]]},
+    )
+    assert forbidden_update.status_code == 403
+    assert forbidden_update.json()["detail"] == "无权维护该组成员"
+
+    reject_remove_leader = client.put(
+        f"/api/workspace/groups/{group_alpha['id']}/members",
+        headers=alice_headers,
+        json={"user_ids": [bob["id"]]},
+    )
+    assert reject_remove_leader.status_code == 422
+    assert reject_remove_leader.json()["detail"] == "组长必须保留在组成员中"
+
+
+def test_group_member_add_and_remove_endpoints(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    group = create_group_record(client, admin_headers, name="交互组", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    added_group = add_group_member_record(client, alice_headers, group_id=group["id"], user_id=bob["id"])
+    assert {member["username"] for member in added_group["members"]} == {"alice", "bob"}
+
+    removed_group = remove_group_member_record(client, alice_headers, group_id=group["id"], user_id=bob["id"])
+    assert [member["username"] for member in removed_group["members"]] == ["alice"]
+
+
+def test_group_member_add_rejects_duplicate_and_remove_rejects_leader(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    group = create_group_record(client, admin_headers, name="重复组", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    add_group_member_record(client, alice_headers, group_id=group["id"], user_id=bob["id"])
+
+    duplicate_response = client.post(
+        f"/api/workspace/groups/{group['id']}/members",
+        headers=alice_headers,
+        json={"user_id": bob["id"]},
+    )
+    assert duplicate_response.status_code == 409
+    assert duplicate_response.json()["detail"] == "该用户已在组内"
+
+    remove_leader_response = client.delete(
+        f"/api/workspace/groups/{group['id']}/members/{alice['id']}",
+        headers=alice_headers,
+    )
+    assert remove_leader_response.status_code == 422
+    assert remove_leader_response.json()["detail"] == "组长不能被移除，请先更换组长"
+
+
+def test_group_member_add_and_remove_reject_unauthorized_access(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    charlie = create_user_account(client, admin_headers, "charlie", "charlie-pass")
+    group = create_group_record(client, admin_headers, name="权限组", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+
+    add_group_member_record(client, alice_headers, group_id=group["id"], user_id=bob["id"])
+
+    charlie_headers = auth_headers(client, "charlie", "charlie-pass")
+    unauthorized_add = client.post(
+        f"/api/workspace/groups/{group['id']}/members",
+        headers=charlie_headers,
+        json={"user_id": charlie["id"]},
+    )
+    assert unauthorized_add.status_code == 403
+    assert unauthorized_add.json()["detail"] == "无权维护该组成员"
+
+    unauthorized_remove = client.delete(
+        f"/api/workspace/groups/{group['id']}/members/{bob['id']}",
+        headers=charlie_headers,
+    )
+    assert unauthorized_remove.status_code == 403
+    assert unauthorized_remove.json()["detail"] == "无权维护该组成员"
+
+
+def test_group_member_can_view_joined_groups_and_members(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    charlie = create_user_account(client, admin_headers, "charlie", "charlie-pass")
+
+    alpha = create_group_record(client, admin_headers, name="Alpha 组", leader_user_id=alice["id"])
+    beta = create_group_record(client, admin_headers, name="Beta 组", leader_user_id=alice["id"])
+
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    replace_group_member_list(client, alice_headers, group_id=alpha["id"], user_ids=[alice["id"], bob["id"]])
+    replace_group_member_list(
+        client,
+        alice_headers,
+        group_id=beta["id"],
+        user_ids=[alice["id"], bob["id"], charlie["id"]],
+    )
+
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+    visible_groups = client.get("/api/workspace/groups", headers=bob_headers)
+    assert visible_groups.status_code == 200
+
+    payload = visible_groups.json()
+    assert {group["name"] for group in payload} == {"Alpha 组", "Beta 组"}
+    beta_group = next(group for group in payload if group["name"] == "Beta 组")
+    assert {member["username"] for member in beta_group["members"]} == {"alice", "bob", "charlie"}
+
+
+def test_group_member_remains_read_only_for_member_management(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    charlie = create_user_account(client, admin_headers, "charlie", "charlie-pass")
+
+    group = create_group_record(client, admin_headers, name="只读组", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    replace_group_member_list(client, alice_headers, group_id=group["id"], user_ids=[alice["id"], bob["id"]])
+
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+    member_options = client.get("/api/workspace/groups/member-options", headers=bob_headers)
+    assert member_options.status_code == 403
+    assert member_options.json()["detail"] == "当前用户没有可管理的组"
+
+    add_response = client.post(
+        f"/api/workspace/groups/{group['id']}/members",
+        headers=bob_headers,
+        json={"user_id": charlie["id"]},
+    )
+    assert add_response.status_code == 403
+    assert add_response.json()["detail"] == "无权维护该组成员"
+
+    remove_response = client.delete(
+        f"/api/workspace/groups/{group['id']}/members/{alice['id']}",
+        headers=bob_headers,
+    )
+    assert remove_response.status_code == 403
+    assert remove_response.json()["detail"] == "无权维护该组成员"
+
+
+def test_non_admin_cannot_define_groups(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    response = client.post(
+        "/api/admin/groups",
+        headers=alice_headers,
+        json={"name": "越权组", "leader_user_id": alice["id"]},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "仅管理员可访问该功能"
+
+
+def test_admin_can_delete_group_without_skill_references(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    group = create_group_record(client, admin_headers, name="待删除组", leader_user_id=alice["id"])
+
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    replace_group_member_list(
+        client,
+        alice_headers,
+        group_id=group["id"],
+        user_ids=[alice["id"], bob["id"]],
+    )
+
+    delete_response = client.delete(f"/api/admin/groups/{group['id']}", headers=admin_headers)
+    assert delete_response.status_code == 200
+    assert delete_response.json()["message"] == "用户组已删除"
+
+    list_response = client.get("/api/admin/groups", headers=admin_headers)
+    assert list_response.status_code == 200
+    assert list_response.json() == []
+
+    with engine.begin() as connection:
+        remaining_group_memberships = connection.execute(
+            text("SELECT COUNT(*) AS count FROM group_memberships WHERE group_id = :group_id"),
+            {"group_id": group["id"]},
+        ).mappings().one()["count"]
+
+    assert remaining_group_memberships == 0
+
+
+def test_delete_group_rejects_non_admin_and_missing_group(client: TestClient):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    group = create_group_record(client, admin_headers, name="保留组", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    forbidden_response = client.delete(f"/api/admin/groups/{group['id']}", headers=alice_headers)
+    assert forbidden_response.status_code == 403
+    assert forbidden_response.json()["detail"] == "仅管理员可访问该功能"
+
+    missing_response = client.delete("/api/admin/groups/99999", headers=admin_headers)
+    assert missing_response.status_code == 404
+    assert missing_response.json()["detail"] == "用户组不存在"
+
+
+def test_delete_group_rejects_when_skill_still_references_group(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    group = create_group_record(client, admin_headers, name="技能组", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+
+    create_local_skill(client, monkeypatch, alice_headers, name="blocked-delete-skill", group_id=group["id"])
+
+    delete_response = client.delete(f"/api/admin/groups/{group['id']}", headers=admin_headers)
+    assert delete_response.status_code == 422
+    assert delete_response.json()["detail"] == "当前组仍被 Skill 引用，不能删除"
+
+    list_response = client.get("/api/admin/groups", headers=admin_headers)
+    assert list_response.status_code == 200
+    assert [item["name"] for item in list_response.json()] == ["技能组"]
+
+
 def test_upload_requires_root_skill_md(client: TestClient, monkeypatch):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
@@ -520,6 +889,61 @@ def test_workspace_user_skill_isolation(client: TestClient, monkeypatch):
     assert admin_list.status_code == 200
     assert admin_list.json()[0]["owner_username"] == "alice"
     assert admin_list.json()[0]["is_deleted"] is False
+
+
+def test_group_membership_does_not_grant_workspace_skill_management(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+
+    group = create_group_record(client, admin_headers, name="共享组", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+    replace_group_member_list(
+        client,
+        alice_headers,
+        group_id=group["id"],
+        user_ids=[alice["id"], bob["id"]],
+    )
+
+    create_local_skill(client, monkeypatch, alice_headers, name="shared-skill", group_id=group["id"])
+
+    bob_detail = client.get("/api/workspace/skills/shared-skill", headers=bob_headers)
+    assert bob_detail.status_code == 404
+
+    bob_delete = client.delete("/api/workspace/skills/shared-skill", headers=bob_headers)
+    assert bob_delete.status_code == 404
+
+
+def test_non_admin_cannot_bind_skill_to_unrelated_group_but_admin_can(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    group = create_group_record(client, admin_headers, name="Bob 组", leader_user_id=bob["id"])
+
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    forbidden_create = client.post(
+        "/api/workspace/skills",
+        headers=alice_headers,
+        files={"zip_file": ("group.zip", make_zip("# group"), "application/zip")},
+        data={"name": "forbidden-group-skill", "description_markdown": "# demo", "group_id": str(group["id"])},
+    )
+    assert forbidden_create.status_code == 403
+    assert forbidden_create.json()["detail"] == "无权将 Skill 绑定到该组"
+
+    allowed_create = client.post(
+        "/api/workspace/skills",
+        headers=admin_headers,
+        files={"zip_file": ("group.zip", make_zip("# group"), "application/zip")},
+        data={"name": "admin-group-skill", "description_markdown": "# demo", "group_id": str(group["id"])},
+    )
+    assert allowed_create.status_code == 201
+    assert allowed_create.json()["group_name"] == "Bob 组"
 
 
 def test_workspace_delete_hides_public_and_user_views_but_admin_sees_deleted_status(client: TestClient, monkeypatch):
@@ -862,9 +1286,9 @@ def test_schema_compatibility_adds_access_control_and_backfills_owner():
     columns = {column["name"] for column in inspect(engine).get_columns("skills")}
     user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
     table_names = set(inspect(engine).get_table_names())
-    assert {"contributor", "current_version", "deleted_at", "owner_id"}.issubset(columns)
+    assert {"contributor", "current_version", "deleted_at", "group_id", "owner_id"}.issubset(columns)
     assert {"source", "display_name", "external_principal"}.issubset(user_columns)
-    assert {"skill_versions", "roles", "users"}.issubset(table_names)
+    assert {"group_memberships", "groups", "skill_versions", "roles", "users"}.issubset(table_names)
 
     with engine.begin() as connection:
         skill_row = connection.execute(
@@ -1193,6 +1617,52 @@ def test_schema_compatibility_replaces_legacy_postgresql_unique_name_index():
     assert not any('DROP INDEX IF EXISTS "uq_skills_active_name"' in sql for sql in executed_sql)
     assert any("CREATE UNIQUE INDEX IF NOT EXISTS uq_skills_active_name" in sql for sql in executed_sql)
     assert any("CREATE INDEX IF NOT EXISTS ix_skills_name ON skills (name)" in sql for sql in executed_sql)
+
+
+def test_group_scoped_skill_visibility_filters_public_list_and_detail(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    create_user_account(client, admin_headers, "charlie", "charlie-pass")
+
+    group = create_group_record(client, admin_headers, name="组内共享", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+    charlie_headers = auth_headers(client, "charlie", "charlie-pass")
+    replace_group_member_list(
+        client,
+        alice_headers,
+        group_id=group["id"],
+        user_ids=[alice["id"], bob["id"]],
+    )
+
+    create_local_skill(client, monkeypatch, alice_headers, name="team-skill", group_id=group["id"])
+
+    anonymous_list = client.get("/api/skills")
+    assert anonymous_list.status_code == 200
+    assert anonymous_list.json()["local_items"] == []
+
+    member_list = client.get("/api/skills", headers=bob_headers)
+    assert member_list.status_code == 200
+    assert [item["name"] for item in member_list.json()["local_items"]] == ["team-skill"]
+
+    outsider_list = client.get("/api/skills", headers=charlie_headers)
+    assert outsider_list.status_code == 200
+    assert outsider_list.json()["local_items"] == []
+
+    anonymous_detail = client.get("/api/skills/local/team-skill")
+    assert anonymous_detail.status_code == 404
+
+    member_detail = client.get("/api/skills/local/team-skill", headers=bob_headers)
+    assert member_detail.status_code == 200
+    assert member_detail.json()["name"] == "team-skill"
+
+    member_version_detail = client.get("/api/skills/local/team-skill/versions/1.0.0", headers=bob_headers)
+    assert member_version_detail.status_code == 200
+    assert member_version_detail.json()["version"] == "1.0.0"
+
+    outsider_detail = client.get("/api/skills/local/team-skill", headers=charlie_headers)
+    assert outsider_detail.status_code == 404
 
 
 def test_public_skills_groups_local_and_remote_results(client: TestClient, monkeypatch):

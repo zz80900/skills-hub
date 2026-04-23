@@ -270,6 +270,62 @@ export async function createUser(payload) {
   })
 }
 
+export async function fetchAdminGroups() {
+  return await request(buildUrl('/api/admin/groups'))
+}
+
+export async function createGroup(payload) {
+  return await request(buildUrl('/api/admin/groups'), {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateGroup(groupId, payload) {
+  return await request(buildUrl(`/api/admin/groups/${encodeURIComponent(groupId)}`), {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteGroup(groupId) {
+  return await request(buildUrl(`/api/admin/groups/${encodeURIComponent(groupId)}`), {
+    method: 'DELETE',
+  })
+}
+
+export async function fetchWorkspaceGroups() {
+  return await request(buildUrl('/api/workspace/groups'))
+}
+
+export async function fetchGroupOptions() {
+  return await request(buildUrl('/api/workspace/groups/options'))
+}
+
+export async function fetchGroupMemberOptions() {
+  return await request(buildUrl('/api/workspace/groups/member-options'))
+}
+
+export async function updateGroupMembers(groupId, userIds) {
+  return await request(buildUrl(`/api/workspace/groups/${encodeURIComponent(groupId)}/members`), {
+    method: 'PUT',
+    body: JSON.stringify({ user_ids: userIds }),
+  })
+}
+
+export async function addGroupMember(groupId, userId) {
+  return await request(buildUrl(`/api/workspace/groups/${encodeURIComponent(groupId)}/members`), {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  })
+}
+
+export async function removeGroupMember(groupId, userId) {
+  return await request(buildUrl(`/api/workspace/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`), {
+    method: 'DELETE',
+  })
+}
+
 export async function updateUser(userId, payload) {
   return await request(buildUrl(`/api/admin/users/${encodeURIComponent(userId)}`), {
     method: 'PUT',

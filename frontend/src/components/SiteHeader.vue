@@ -10,38 +10,29 @@ import {
   fetchPublicConfig,
   getUserDisplayName,
   getWorkspaceRoute,
-  isAdmin,
   isAuthenticated,
   logout,
 } from '../services/api'
 
 const route = useRoute()
 const router = useRouter()
-const infoTabs = [
-  { key: 'guide', label: '使用教程' },
-  { key: 'cli', label: '安装 CLI' },
-]
-const activeInfoTab = ref('')
+const isGuideModalOpen = ref(false)
 const cliInstallCommand = ref('')
 const publicConfigLoading = ref(false)
 const publicConfigError = ref('')
 
 const loggedIn = computed(() => isAuthenticated())
-const isInfoModalOpen = computed(() => Boolean(activeInfoTab.value))
-const workspaceLabel = computed(() => (isAdmin() ? '工作台' : '我的 Skill'))
-const infoModalTitle = computed(() => (activeInfoTab.value === 'cli' ? '安装 CLI' : '使用教程'))
-const infoModalSummary = computed(() =>
-  activeInfoTab.value === 'cli'
-    ? '先安装 nexgo-skills CLI，再通过首页复制具体 Skill 安装命令。'
-    : ' ',
-)
-const userBadge = computed(() => {
+const userCenterLabel = computed(() => {
   if (!authState.user) {
-    return ''
+    return '用户中心'
   }
-  const displayName = getUserDisplayName(authState.user)
-  const label = displayName === authState.user.username ? displayName : `${displayName} (${authState.user.username})`
-  return `${label} · ${authState.user.role === 'ADMIN' ? '管理员' : '普通用户'}`
+  return getUserDisplayName(authState.user)
+})
+const userCenterTooltip = computed(() => {
+  if (!authState.user) {
+    return '进入用户中心'
+  }
+  return `${userCenterLabel.value} · ${authState.user.role === 'ADMIN' ? '管理员' : '普通用户'}`
 })
 const loginTarget = computed(() => {
   if (route.name === 'login') {
@@ -67,15 +58,13 @@ async function loadPublicConfig() {
   }
 }
 
-function handleInfoTabClick(tabKey) {
-  activeInfoTab.value = activeInfoTab.value === tabKey ? '' : tabKey
-  if (activeInfoTab.value === 'cli') {
-    loadPublicConfig()
-  }
+function openGuideModal() {
+  isGuideModalOpen.value = true
+  loadPublicConfig()
 }
 
-function closeInfoModal() {
-  activeInfoTab.value = ''
+function closeGuideModal() {
+  isGuideModalOpen.value = false
 }
 
 async function handleLogout() {
@@ -108,23 +97,21 @@ onMounted(() => {
           active-class="site-header__link--route-active"
           exact-active-class="is-active"
         >
-          Skills
+          首页
         </router-link>
         <button
-          v-for="tab in infoTabs"
-          :key="tab.key"
           class="site-header__link site-header__link--button"
-          :class="{ 'is-active': activeInfoTab === tab.key }"
+          :class="{ 'is-active': isGuideModalOpen }"
           type="button"
-          :aria-pressed="activeInfoTab === tab.key"
-          @click="handleInfoTabClick(tab.key)"
+          :aria-pressed="isGuideModalOpen"
+          @click="openGuideModal"
         >
-          {{ tab.label }}
+          使用教程
         </button>
         <template v-if="loggedIn">
-          <router-link class="site-header__link" :to="getWorkspaceRoute()">{{ workspaceLabel }}</router-link>
-          <router-link v-if="isAdmin()" class="site-header__link" to="/workspace/users">用户管理</router-link>
-          <span class="site-header__badge">{{ userBadge }}</span>
+          <router-link class="site-header__link" :to="getWorkspaceRoute()" :title="userCenterTooltip">
+            {{ userCenterLabel }}
+          </router-link>
           <button class="site-header__link site-header__link--button" type="button" @click="handleLogout">
             退出
           </button>
@@ -134,29 +121,48 @@ onMounted(() => {
     </div>
   </header>
   <InfoModal
-    :open="isInfoModalOpen"
-    :title="infoModalTitle"
-    :summary="infoModalSummary"
-    width="720px"
-    @close="closeInfoModal"
+    :open="isGuideModalOpen"
+    title="使用教程"
+    summary="在这里完成 CLI 安装、Skill 浏览和登录后管理的完整入门流程。"
+    width="760px"
+    @close="closeGuideModal"
   >
-    <ol v-if="activeInfoTab === 'guide'" class="info-modal__list">
-      <li>本 CLI 依赖 Node.js 18 及以上版本，请先<a href="https://nodejs.org/en/download/" target="_blank"><b>下载</b></a>并安装。</li>
-      <li>点击“安装 CLI”，复制 nexgo-skills CLI 安装命令到终端执行。</li>
-      <li>选择您需要的 Skill，点击卡片查看详情；随后在终端执行相应的 Skill 安装命令即可（支持多种主流 AI IDE）。</li>
-      <li>登录工作台后，您还可以上传并分享自己开发的 Skill。</li>
-    </ol>
+    <section class="guide-modal__section">
+      <h3>1. 安装准备</h3>
+      <ol class="info-modal__list">
+        <li>本 CLI 依赖 Node.js 18 及以上版本，请先<a href="https://nodejs.org/en/download/" target="_blank"><b>下载</b></a>并安装。</li>
+        <li>执行下面的 CLI 安装命令，完成本地命令行工具安装。</li>
+      </ol>
+    </section>
+
     <CommandSnippet
-      v-else-if="activeInfoTab === 'cli' && cliInstallCommand"
+      v-if="cliInstallCommand"
       label="CLI 安装命令"
       :command="cliInstallCommand"
       compact
     />
-    <section v-else-if="activeInfoTab === 'cli' && publicConfigError" class="feedback feedback--error feedback--inline">
+    <section v-else-if="publicConfigError" class="feedback feedback--error feedback--inline">
       {{ publicConfigError }}
     </section>
-    <section v-else-if="activeInfoTab === 'cli'" class="feedback feedback--inline">
+    <section v-else class="feedback feedback--inline">
       正在加载 CLI 安装命令...
+    </section>
+
+    <section class="guide-modal__section">
+      <h3>2. 浏览并安装 Skill</h3>
+      <ol class="info-modal__list">
+        <li>在首页浏览需要的 Skill，点击卡片查看详情。</li>
+        <li>复制对应 Skill 的安装命令，并在终端执行安装。</li>
+      </ol>
+    </section>
+
+    <section class="guide-modal__section">
+      <h3>3. 登录后进入用户中心</h3>
+      <ol class="info-modal__list">
+        <li>登录后点击右上角你的名字，进入用户中心。</li>
+        <li>在用户中心内统一切换 Skill 管理、组管理和用户管理（管理员）。</li>
+        <li>你也可以在用户中心上传、维护和分享自己开发的 Skill。</li>
+      </ol>
     </section>
   </InfoModal>
 </template>

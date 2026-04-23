@@ -13,16 +13,12 @@ from app.services.user_service import ROLE_ADMIN
 bearer_scheme = HTTPBearer(auto_error=False)
 DbSession = Annotated[Session, Depends(get_db)]
 
-
-def get_current_user(
+def _resolve_current_user(
     session: DbSession,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-) -> User:
+) -> User | None:
     if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="请先登录",
-        )
+        return None
 
     payload = decode_access_token(credentials.credentials)
     try:
@@ -39,6 +35,26 @@ def get_current_user(
             detail="登录状态无效或账号已停用",
         )
     return user
+
+
+def get_current_user(
+    session: DbSession,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> User:
+    user = _resolve_current_user(session, credentials)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="请先登录",
+        )
+    return user
+
+
+def get_optional_current_user(
+    session: DbSession,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> User | None:
+    return _resolve_current_user(session, credentials)
 
 
 def require_admin(current_user: Annotated[User, Depends(get_current_user)]) -> User:

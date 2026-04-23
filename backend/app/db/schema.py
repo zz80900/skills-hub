@@ -16,6 +16,7 @@ SKILL_COLUMNS = {
     "contributor": "ALTER TABLE skills ADD COLUMN contributor VARCHAR(128)",
     "current_version": "ALTER TABLE skills ADD COLUMN current_version VARCHAR(16) NOT NULL DEFAULT '1.0.0'",
     "deleted_at": "ALTER TABLE skills ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE",
+    "group_id": "ALTER TABLE skills ADD COLUMN group_id INTEGER",
     "owner_id": "ALTER TABLE skills ADD COLUMN owner_id INTEGER",
 }
 USER_COLUMNS = {
@@ -28,6 +29,8 @@ USER_COLUMNS = {
 def ensure_schema_compatibility(engine: Engine) -> None:
     Base.metadata.tables["roles"].create(bind=engine, checkfirst=True)
     Base.metadata.tables["users"].create(bind=engine, checkfirst=True)
+    Base.metadata.tables["groups"].create(bind=engine, checkfirst=True)
+    Base.metadata.tables["group_memberships"].create(bind=engine, checkfirst=True)
     Base.metadata.tables["skill_versions"].create(bind=engine, checkfirst=True)
     inspector = inspect(engine)
     _ensure_user_columns(engine, inspector)
@@ -41,7 +44,9 @@ def ensure_schema_compatibility(engine: Engine) -> None:
     _ensure_skill_columns(engine, inspector)
     _backfill_skill_versions(engine)
     _backfill_skill_owners(engine, default_admin_id)
+    _ensure_group_leader_memberships(engine)
     _ensure_skill_name_uniqueness_policy(engine)
+    _ensure_skill_indexes(engine)
 
 
 def _ensure_skill_columns(engine: Engine, inspector) -> None:
@@ -215,6 +220,28 @@ def _backfill_skill_owners(engine: Engine, default_admin_id: int) -> None:
         )
 
 
+def _ensure_group_leader_memberships(engine: Engine) -> None:
+    table_names = set(inspect(engine).get_table_names())
+    if "groups" not in table_names or "group_memberships" not in table_names:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO group_memberships (group_id, user_id, created_at)
+                SELECT groups.id, groups.leader_user_id, CURRENT_TIMESTAMP
+                FROM groups
+                LEFT JOIN group_memberships
+                    ON group_memberships.group_id = groups.id
+                    AND group_memberships.user_id = groups.leader_user_id
+                WHERE groups.leader_user_id IS NOT NULL
+                  AND group_memberships.id IS NULL
+                """
+            )
+        )
+
+
 def _ensure_skill_name_uniqueness_policy(engine: Engine) -> None:
     dialect_name = engine.dialect.name
     if dialect_name == "sqlite":
@@ -312,6 +339,7 @@ def _rebuild_sqlite_skills_table_without_global_unique_name(engine: Engine) -> N
                         id INTEGER NOT NULL PRIMARY KEY,
                         name VARCHAR(64) NOT NULL,
                         owner_id INTEGER NOT NULL,
+                        group_id INTEGER,
                         description_markdown TEXT NOT NULL DEFAULT '',
                         description_html TEXT NOT NULL DEFAULT '',
                         contributor VARCHAR(128),
@@ -320,7 +348,8 @@ def _rebuild_sqlite_skills_table_without_global_unique_name(engine: Engine) -> N
                         deleted_at TIMESTAMP,
                         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY(owner_id) REFERENCES users (id)
+                        FOREIGN KEY(owner_id) REFERENCES users (id),
+                        FOREIGN KEY(group_id) REFERENCES groups (id)
                     )
                     """
                 )
@@ -332,6 +361,7 @@ def _rebuild_sqlite_skills_table_without_global_unique_name(engine: Engine) -> N
                         id,
                         name,
                         owner_id,
+                        group_id,
                         description_markdown,
                         description_html,
                         contributor,
@@ -345,6 +375,7 @@ def _rebuild_sqlite_skills_table_without_global_unique_name(engine: Engine) -> N
                         id,
                         name,
                         owner_id,
+                        group_id,
                         description_markdown,
                         description_html,
                         contributor,
@@ -361,6 +392,7 @@ def _rebuild_sqlite_skills_table_without_global_unique_name(engine: Engine) -> N
             connection.execute(text("ALTER TABLE skills__migration RENAME TO skills"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_name ON skills (name)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_owner_id ON skills (owner_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_group_id ON skills (group_id)"))
         finally:
             connection.execute(text("PRAGMA foreign_keys=ON"))
 
@@ -413,6 +445,12 @@ def _ensure_postgresql_skill_name_uniqueness_policy(engine: Engine) -> None:
             )
         )
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_name ON skills (name)"))
+
+
+def _ensure_skill_indexes(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_owner_id ON skills (owner_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_group_id ON skills (group_id)"))
 
 
 def _postgresql_is_legacy_global_unique_skill_name_index(index_sql: str | None) -> bool:

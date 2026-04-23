@@ -1,12 +1,13 @@
 import httpx
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, get_optional_current_user
 from app.core.config import get_settings
+from app.models.user import User
 from app.schemas.skill import PublicConfigResponse, PublicSkillDetail, PublicSkillSummary, SkillListResponse
 from app.services.skill_service import (
     PUBLIC_SOURCE_LOCAL,
-    get_skill_by_name,
+    get_public_skill_by_name,
     get_skill_version,
     get_skill_versions,
     search_public_skills,
@@ -35,6 +36,7 @@ async def get_public_config():
 @router.get("/skills", response_model=SkillListResponse)
 async def list_skills(
     session: DbSession,
+    current_user: User | None = Depends(get_optional_current_user),
     q: str | None = Query(default=None, description="搜索关键词"),
     page: int = Query(default=1, ge=1, description="skills.sh 页码"),
     page_size: int = Query(default=12, ge=1, le=48, description="skills.sh 每页条数"),
@@ -42,7 +44,7 @@ async def list_skills(
     settings = get_settings()
     local_items = [
         PublicSkillSummary.model_validate(to_local_public_skill_summary(skill))
-        for skill in search_public_skills(session, q)
+        for skill in search_public_skills(session, q, current_user)
     ]
 
     remote_items: list[PublicSkillSummary] = []
@@ -69,8 +71,13 @@ async def list_skills(
 
 
 @router.get("/skills/local/{slug}/versions/{version}", response_model=PublicSkillDetail)
-async def get_local_skill_version(slug: str, version: str, session: DbSession):
-    skill = get_skill_by_name(session, slug)
+async def get_local_skill_version(
+    slug: str,
+    version: str,
+    session: DbSession,
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    skill = get_public_skill_by_name(session, slug, current_user)
     if skill is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
 
@@ -83,9 +90,14 @@ async def get_local_skill_version(slug: str, version: str, session: DbSession):
 
 
 @router.get("/skills/{source}/{slug:path}", response_model=PublicSkillDetail)
-async def get_skill(source: str, slug: str, session: DbSession):
+async def get_skill(
+    source: str,
+    slug: str,
+    session: DbSession,
+    current_user: User | None = Depends(get_optional_current_user),
+):
     if source == PUBLIC_SOURCE_LOCAL:
-        skill = get_skill_by_name(session, slug)
+        skill = get_public_skill_by_name(session, slug, current_user)
         if skill is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
         versions = get_skill_versions(session, skill)

@@ -63,6 +63,8 @@ class ManagedSkillSummary(BaseModel):
     id: int
     name: str
     owner_username: str | None = None
+    group_id: int | None = None
+    group_name: str | None = None
     current_version: str
     contributor: str | None = None
     description_html: str
