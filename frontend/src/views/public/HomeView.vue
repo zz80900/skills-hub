@@ -49,6 +49,9 @@ const remoteTabSummary = computed(() => {
   }
   return `已加载 ${remoteSkills.value.length} 个 skills.sh Skill`
 })
+const activeLibraryLabel = computed(() =>
+  libraryTabs.find((tab) => tab.key === activeLibraryTab.value)?.label || '本地库',
+)
 
 function buildHomeQuery(overrides = {}) {
   const nextQuery = { ...route.query, ...overrides }
@@ -152,6 +155,13 @@ function handleLibraryTabSelect(tabKey) {
   })
 }
 
+function clearSearch() {
+  if (!search.value) {
+    return
+  }
+  search.value = ''
+}
+
 function openSkillDetail(skill) {
   router.replace({
     name: 'home',
@@ -253,31 +263,52 @@ onBeforeUnmount(() => {
     <SiteHeader />
     <main class="page-content">
       <section class="search-panel search-panel--home">
-        <label class="search-field search-field--inline" for="skill-search">
-          <span class="search-field__label search-field__label--inline">
-            搜索 Skill，统一检索本地库与 skills.sh。
-          </span>
-          <input
-            id="skill-search"
-            v-model.trim="search"
-            class="text-input"
-            type="search"
-            placeholder="例如：plm、admin、markdown"
-          />
+        <div class="admin-search__copy">
+          <p class="eyebrow">Search</p>
+          <h2>统一搜索与来源切换</h2>
+          <p class="search-panel__lead">
+            在本地库与 skills.sh 之间快速切换，当前来源独立搜索 Skill，并继续保留原有详情与安装流程。
+          </p>
+          <div class="search-panel__switcher">
+            <section class="library-tabs library-tabs--embedded" aria-label="Skill 来源切换">
+              <button
+                v-for="tab in libraryTabs"
+                :key="tab.key"
+                class="library-tabs__button"
+                :class="{ 'is-active': activeLibraryTab === tab.key }"
+                type="button"
+                @click="handleLibraryTabSelect(tab.key)"
+              >
+                {{ tab.label }}
+              </button>
+            </section>
+          </div>
+        </div>
+        <label class="search-field search-field--admin search-field--home-control" for="skill-search">
+          <div class="search-field__meta">
+            <span class="search-field__label">当前来源：{{ activeLibraryLabel }}，按名称、用途或作者关键词检索。</span>
+            <span class="search-field__status">
+              {{ activeLibraryTab === 'local' ? localTabSummary : remoteTabSummary }}
+            </span>
+          </div>
+          <div class="search-field__control">
+            <input
+              id="skill-search"
+              v-model.trim="search"
+              class="text-input"
+              type="search"
+              placeholder="例如：plm、admin、markdown"
+            />
+            <button
+              v-if="search"
+              class="search-field__clear"
+              type="button"
+              @click="clearSearch"
+            >
+              清空
+            </button>
+          </div>
         </label>
-      </section>
-
-      <section class="library-tabs" aria-label="Skill 来源切换">
-        <button
-          v-for="tab in libraryTabs"
-          :key="tab.key"
-          class="library-tabs__button"
-          :class="{ 'is-active': activeLibraryTab === tab.key }"
-          type="button"
-          @click="handleLibraryTabSelect(tab.key)"
-        >
-          {{ tab.label }}
-        </button>
       </section>
 
       <section v-if="error" class="feedback feedback--error">{{ error }}</section>
@@ -308,7 +339,7 @@ onBeforeUnmount(() => {
           <div class="skill-section__header">
             <div>
               <p class="eyebrow">skills.sh</p>
-
+              <h2>远程 Skills</h2>
             </div>
             <p class="skill-section__summary">{{ remoteTabSummary }}</p>
           </div>

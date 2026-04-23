@@ -72,6 +72,42 @@ npm run dev
 - 前端：`http://localhost:5173`
 - 后端：`http://localhost:8000`
 
+## 一键启动本地开发环境
+
+仓库根目录提供了统一脚本 [dev.ps1](E:/code_ai/nexgo-skills-lib/dev.ps1)，默认行为是：
+
+- 后端使用仓库内 `backend/local-dev.db` 作为 SQLite 本地开发库
+- 前端启动 Vite 开发服务器
+- 自动记录前后端根进程 PID，方便后续关闭和查看状态
+
+常用命令：
+
+```powershell
+cd "E:/code_ai/nexgo-skills-lib"
+./dev.ps1 start
+./dev.ps1 status
+./dev.ps1 stop
+./dev.ps1 restart
+```
+
+如果你要改回 `.env` 中的数据库配置，例如本机 PostgreSQL：
+
+```powershell
+./dev.ps1 start -UseEnvDatabase
+```
+
+脚本启动后默认地址：
+
+- 前端：`http://127.0.0.1:5173`
+- 后端：`http://127.0.0.1:8000`
+
+日志文件位置：
+
+- `backend/latest_logs/dev-backend.log`
+- `backend/latest_logs/dev-backend.err.log`
+- `frontend/latest_logs/dev-frontend.log`
+- `frontend/latest_logs/dev-frontend.err.log`
+
 ## Docker 部署
 
 单镜像同时承载前端和后端，编排文件位于 [deploy/docker-compose.yml](E:/code_ai/nexgo-skills-lib/deploy/docker-compose.yml)。

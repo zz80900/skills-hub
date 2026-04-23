@@ -95,7 +95,12 @@ onMounted(() => {
 <template>
   <header class="site-header">
     <div class="site-header__inner">
-      <router-link class="site-header__brand" to="/">NEXGO Skills</router-link>
+      <router-link class="site-header__brand" to="/">
+        <span class="site-header__brand-mark" aria-hidden="true">S</span>
+        <span class="site-header__brand-copy">
+          <strong>NEXGO Skills</strong>
+        </span>
+      </router-link>
       <nav class="site-header__nav">
         <router-link
           class="site-header__link"

@@ -30,3 +30,11 @@ backend/tests/test.db
 *.tmp
 *.swp
 Thumbs.db
+.dev-env.state.json
+.claude/*.pid
+.codex/skills/
+backend/local-dev.db
+backend/tests/debug-schema.db
+backend/tests/local-debug-tmp/
+dev.ps1
+openspec/
