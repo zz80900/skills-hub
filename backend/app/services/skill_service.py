@@ -22,6 +22,15 @@ MAX_SKILL_VERSION = "9.9.9"
 PUBLIC_SOURCE_LOCAL = "local"
 PUBLIC_SOURCE_LOCAL_LABEL = "本地库"
 UNSET = object()
+ZIP_ROOT_SKILL_MD = "SKILL.md"
+ZIP_ROOT_CMD = "cmd"
+ZIP_ROOT_SKILL_MD_REQUIRED_DETAIL = "ZIP 压缩包根目录必须包含 SKILL.md"
+ZIP_SKILL_MD_BLANK_DETAIL = "SKILL.md 不能为空白文件"
+ZIP_CMD_PREFIX_DETAIL = "cmd 文件只能包含一条以 npm install 开头的命令"
+ZIP_CMD_CHAIN_DETAIL = "cmd 文件不能包含其他命令或命令拼接"
+ZIP_CMD_PATTERN = re.compile(r"^npm install(?:\s+.+)?$")
+SKILL_NAME_SPACE_DETAIL = "Skill 名称不能包含空格"
+SKILL_NAME_PATTERN_DETAIL = "Skill 名称只允许小写字母、数字和中划线"
 
 
 def normalize_optional_text(value: str | None) -> str | None:
@@ -31,12 +40,68 @@ def normalize_optional_text(value: str | None) -> str | None:
 
 def validate_skill_name(name: str) -> str:
     normalized_name = (name or "").strip()
+    if any(char.isspace() for char in normalized_name):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=SKILL_NAME_SPACE_DETAIL,
+        )
     if not SKILL_NAME_PATTERN.fullmatch(normalized_name):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Skill 名称只允许小写字母、数字和中划线",
+            detail=SKILL_NAME_PATTERN_DETAIL,
         )
     return normalized_name
+
+
+def _raise_zip_validation_error(detail: str) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=detail,
+    )
+
+
+def _normalize_archive_name(name: str) -> str:
+    return name.replace("\\", "/").rstrip("/")
+
+
+def _get_root_archive_files(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
+    root_files: dict[str, zipfile.ZipInfo] = {}
+    for info in archive.infolist():
+        normalized_name = _normalize_archive_name(info.filename)
+        if info.is_dir() or not normalized_name or "/" in normalized_name:
+            continue
+        root_files[normalized_name] = info
+    return root_files
+
+
+def _read_archive_text(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
+    return archive.read(info.filename).decode("utf-8", errors="ignore")
+
+
+def _validate_skill_md_entry(archive: zipfile.ZipFile, root_files: dict[str, zipfile.ZipInfo]) -> None:
+    skill_md_info = root_files.get(ZIP_ROOT_SKILL_MD)
+    if skill_md_info is None:
+        _raise_zip_validation_error(ZIP_ROOT_SKILL_MD_REQUIRED_DETAIL)
+
+    skill_md_content = _read_archive_text(archive, skill_md_info).strip()
+    if not skill_md_content:
+        _raise_zip_validation_error(ZIP_SKILL_MD_BLANK_DETAIL)
+
+
+def _validate_cmd_entry(archive: zipfile.ZipFile, root_files: dict[str, zipfile.ZipInfo]) -> None:
+    cmd_info = root_files.get(ZIP_ROOT_CMD)
+    if cmd_info is None:
+        return
+
+    cmd_content = _read_archive_text(archive, cmd_info).strip()
+    if not cmd_content or len(cmd_content.splitlines()) != 1:
+        _raise_zip_validation_error(ZIP_CMD_PREFIX_DETAIL)
+
+    if any(token in cmd_content for token in ("&&", "||", ";", "|")):
+        _raise_zip_validation_error(ZIP_CMD_CHAIN_DETAIL)
+
+    if not ZIP_CMD_PATTERN.fullmatch(cmd_content):
+        _raise_zip_validation_error(ZIP_CMD_PREFIX_DETAIL)
 
 
 async def validate_zip_file(upload_file: UploadFile) -> bytes:
@@ -56,22 +121,9 @@ async def validate_zip_file(upload_file: UploadFile) -> bytes:
 
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            skill_md_name = next(
-                (name for name in archive.namelist() if name.rsplit("/", 1)[-1] == "SKILL.md"),
-                None,
-            )
-            if not skill_md_name:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="ZIP 压缩包中必须包含 SKILL.md",
-                )
-
-            skill_md_content = archive.read(skill_md_name).decode("utf-8", errors="ignore").strip()
-            if not skill_md_content:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="SKILL.md 不能为空白文件",
-                )
+            root_files = _get_root_archive_files(archive)
+            _validate_skill_md_entry(archive, root_files)
+            _validate_cmd_entry(archive, root_files)
     except zipfile.BadZipFile as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

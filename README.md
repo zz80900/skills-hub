@@ -12,8 +12,23 @@
 - 登录时优先匹配本地用户；本地不存在时可切换到 AD 域 Kerberos + LDAP 认证，并自动建普通用户
 - 普通用户登录后仅能查看和操作自己上传的 Skill，管理员可查看全部 Skill 并看到逻辑删除状态
 - 工作台支持创建 Skill、上传 ZIP、升级同名 Skill 和逻辑删除
-- 上传时校验 ZIP 必须包含非空 `SKILL.md`
+- 上传时校验 ZIP 根目录必须包含非空 `SKILL.md`，可选 `cmd` 只能包含单条以 `npm install` 开头的命令
 - ZIP 上传到私有 Nexus `raw-repo/skills/{name}.zip`
+
+## Skill ZIP 约束
+
+工作台上传 Skill ZIP 时，压缩包根目录建议保持如下结构：
+
+```text
+your-skill.zip
+|- SKILL.md
+\- cmd        # 可选，仅当需要额外安装 CLI
+```
+
+- 根目录必须存在非空 `SKILL.md`
+- 如需额外安装 CLI，可在根目录提供一个名为 `cmd` 的文件
+- `cmd` 只能包含一条以 `npm install` 开头的命令
+- `cmd` 不能包含其他命令、命令拼接或多行脚本
 
 ## 目录
 

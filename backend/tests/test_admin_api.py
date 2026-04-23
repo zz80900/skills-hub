@@ -33,10 +33,18 @@ from app.services import nexus as nexus_service
 from app.services.skills_registry import RegistrySkillDetail, RegistrySkillSummary
 
 
-def make_zip(skill_md_content: str) -> bytes:
+def make_zip(
+    skill_md_content: str | None = "# skill",
+    *,
+    skill_md_path: str = "SKILL.md",
+    extra_files: dict[str, str | bytes] | None = None,
+) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("SKILL.md", skill_md_content)
+        if skill_md_content is not None:
+            archive.writestr(skill_md_path, skill_md_content)
+        for path, content in (extra_files or {}).items():
+            archive.writestr(path, content)
     return buffer.getvalue()
 
 
@@ -378,24 +386,112 @@ def test_admin_user_list_supports_search_and_pagination(client: TestClient):
     assert [item["username"] for item in user_list_items(search_by_display_name_payload)] == ["alice"]
 
 
-def test_upload_requires_skill_md(client: TestClient, monkeypatch):
+def test_upload_requires_root_skill_md(client: TestClient, monkeypatch):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
 
     monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("README.md", "# test")
+    response = client.post(
+        "/api/workspace/skills",
+        headers=auth_headers(client),
+        files={"zip_file": ("demo.zip", make_zip(None, extra_files={"README.md": "# test"}), "application/zip")},
+        data={"name": "demo-skill", "description_markdown": "# demo"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "ZIP 压缩包根目录必须包含 SKILL.md"
+
+
+def test_upload_rejects_nested_skill_md(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
 
     response = client.post(
         "/api/workspace/skills",
         headers=auth_headers(client),
-        files={"zip_file": ("demo.zip", buffer.getvalue(), "application/zip")},
-        data={"name": "demo-skill", "description_markdown": "# demo"},
+        files={"zip_file": ("demo.zip", make_zip("# nested", skill_md_path="package/SKILL.md"), "application/zip")},
+        data={"name": "nested-skill", "description_markdown": "# demo"},
     )
     assert response.status_code == 422
-    assert response.json()["detail"] == "ZIP 压缩包中必须包含 SKILL.md"
+    assert response.json()["detail"] == "ZIP 压缩包根目录必须包含 SKILL.md"
+
+
+def test_upload_rejects_blank_root_skill_md(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+
+    response = client.post(
+        "/api/workspace/skills",
+        headers=auth_headers(client),
+        files={"zip_file": ("demo.zip", make_zip("   \n"), "application/zip")},
+        data={"name": "blank-skill", "description_markdown": "# demo"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "SKILL.md 不能为空白文件"
+
+
+def test_upload_accepts_valid_root_cmd(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+
+    response = client.post(
+        "/api/workspace/skills",
+        headers=auth_headers(client),
+        files={
+            "zip_file": (
+                "demo.zip",
+                make_zip("# demo", extra_files={"cmd": "npm install -g @xgd/demo-cli"}),
+                "application/zip",
+            )
+        },
+        data={"name": "cmd-skill", "description_markdown": "# demo"},
+    )
+    assert response.status_code == 201
+    assert response.json()["name"] == "cmd-skill"
+
+
+def test_upload_rejects_cmd_without_npm_install(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+
+    response = client.post(
+        "/api/workspace/skills",
+        headers=auth_headers(client),
+        files={"zip_file": ("demo.zip", make_zip("# demo", extra_files={"cmd": "pnpm add demo"}), "application/zip")},
+        data={"name": "bad-cmd-skill", "description_markdown": "# demo"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "cmd 文件只能包含一条以 npm install 开头的命令"
+
+
+def test_upload_rejects_chained_cmd(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+
+    response = client.post(
+        "/api/workspace/skills",
+        headers=auth_headers(client),
+        files={
+            "zip_file": (
+                "demo.zip",
+                make_zip("# demo", extra_files={"cmd": "npm install -g @xgd/demo-cli && echo done"}),
+                "application/zip",
+            )
+        },
+        data={"name": "chain-cmd-skill", "description_markdown": "# demo"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "cmd 文件不能包含其他命令或命令拼接"
 
 
 def test_workspace_user_skill_isolation(client: TestClient, monkeypatch):
@@ -559,6 +655,22 @@ def test_workspace_create_skill_returns_409_when_active_duplicate_exists(client:
     assert response.json()["detail"] == "Skill 已存在"
 
 
+def test_workspace_create_skill_rejects_name_with_space(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+
+    response = client.post(
+        "/api/workspace/skills",
+        headers=auth_headers(client),
+        files={"zip_file": ("space-skill.zip", make_zip("# demo"), "application/zip")},
+        data={"name": "space skill", "description_markdown": "invalid"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Skill 名称不能包含空格"
+
+
 def test_admin_workspace_skill_detail_prefers_active_then_latest_deleted(client: TestClient, monkeypatch):
     admin_headers = auth_headers(client)
     create_user_account(client, admin_headers, "alice", "alice-pass")
@@ -640,6 +752,31 @@ def test_upgrade_skill_creates_new_version_history(client: TestClient, monkeypat
     assert payload["contributor"] == "admin"
     assert payload["current_version"] == "1.0.1"
     assert [item["version"] for item in payload["version_history"]] == ["1.0.1", "1.0.0"]
+
+
+def test_upgrade_skill_rejects_name_with_space(client: TestClient, monkeypatch):
+    create_local_skill(client, monkeypatch, auth_headers(client), name="space-upgrade")
+
+    response = client.put(
+        "/api/workspace/skills/space%20upgrade",
+        headers=auth_headers(client),
+        data={"description_markdown": "new description"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Skill 名称不能包含空格"
+
+
+def test_upgrade_skill_rejects_invalid_nested_skill_md_zip(client: TestClient, monkeypatch):
+    create_local_skill(client, monkeypatch, auth_headers(client), name="invalid-upgrade")
+
+    response = client.put(
+        "/api/workspace/skills/invalid-upgrade",
+        headers=auth_headers(client),
+        files={"zip_file": ("invalid-upgrade.zip", make_zip("# nested", skill_md_path="pkg/SKILL.md"), "application/zip")},
+        data={"description_markdown": "new description"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "ZIP 压缩包根目录必须包含 SKILL.md"
 
 
 def test_public_local_detail_supports_history_query(client: TestClient, monkeypatch):
