@@ -12,6 +12,13 @@ class UserSummary(BaseModel):
     source: str
     display_name: str | None = None
     external_principal: str | None = None
+    ad_distinguished_name: str | None = None
+    org_level_1: str | None = None
+    org_level_2: str | None = None
+    org_level_3: str | None = None
+    org_level_4: str | None = None
+    org_path: str | None = None
+    org_depth: int | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

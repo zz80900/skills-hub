@@ -10,6 +10,7 @@ from app.services.ad_auth import (
     build_ldap_server_kwargs_candidates,
     create_kerberos_temp_dir,
     normalize_ldap_timeout_seconds,
+    parse_organization_hierarchy,
     parse_ldap_server_url,
 )
 
@@ -74,3 +75,35 @@ def test_create_kerberos_temp_dir_is_writable():
         for child in directory.iterdir():
             child.unlink()
         directory.rmdir()
+
+
+def test_parse_organization_hierarchy_removes_shared_root_and_keeps_four_levels():
+    result = parse_organization_hierarchy(
+        "CN=谢金城,OU=系统方案部,OU=公共技术中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+    )
+    assert result.levels == ("支付硬件事业群", "技术中心", "公共技术中心", "系统方案部")
+    assert result.path == "支付硬件事业群 / 技术中心 / 公共技术中心 / 系统方案部"
+    assert result.depth == 4
+
+
+def test_parse_organization_hierarchy_trims_shared_root_before_limiting_levels():
+    result = parse_organization_hierarchy(
+        "CN=alice,OU=应用一组,OU=平台研发部,OU=研发中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+    )
+    assert result.levels == ("支付硬件事业群", "技术中心", "研发中心", "平台研发部")
+    assert result.path == "支付硬件事业群 / 技术中心 / 研发中心 / 平台研发部"
+    assert result.depth == 4
+
+
+def test_parse_organization_hierarchy_keeps_partial_levels():
+    result = parse_organization_hierarchy("CN=alice,OU=平台研发部,OU=研发中心,OU=新国都集团,DC=xgd,DC=com")
+    assert result.levels == ("研发中心", "平台研发部")
+    assert result.path == "研发中心 / 平台研发部"
+    assert result.depth == 2
+
+
+def test_parse_organization_hierarchy_handles_empty_dn():
+    result = parse_organization_hierarchy("")
+    assert result.levels == tuple()
+    assert result.path == ""
+    assert result.depth == 0

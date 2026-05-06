@@ -5,7 +5,7 @@ from app.api.deps import DbSession, get_current_user
 from app.models.user import User
 from app.schemas.auth import MessageResponse
 from app.schemas.group import GroupMemberCreateRequest, GroupMemberSummary, GroupMembersUpdateRequest, GroupOption, GroupSummary
-from app.schemas.skill import ManagedSkillDetail, ManagedSkillSummary
+from app.schemas.skill import ManagedSkillDetail, ManagedSkillSummary, OrganizationScopeOption
 from app.services.group_service import (
     add_group_member,
     can_manage_group_members,
@@ -26,12 +26,13 @@ from app.services.skill_service import (
     get_skill_by_name,
     get_skill_versions,
     get_workspace_skill_by_name,
+    list_organization_scope_options,
+    resolve_skill_scope,
     search_workspace_skills,
     soft_delete_skill,
     to_admin_skill_detail,
     to_skill_summary,
     update_skill,
-    resolve_skill_group,
     validate_skill_name,
     validate_zip_file,
 )
@@ -51,6 +52,19 @@ def _parse_group_id(raw_value: str | None) -> int | None:
     if group_id <= 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="group_id 必须是正整数")
     return group_id
+
+
+def _parse_optional_positive_int(raw_value: str | None, field_name: str) -> int | None:
+    normalized = (raw_value or "").strip()
+    if not normalized:
+        return None
+    try:
+        value = int(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{field_name} 必须是整数") from exc
+    if value <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{field_name} 必须是正整数")
+    return value
 
 
 @router.get("/skills", response_model=list[ManagedSkillSummary])
@@ -84,6 +98,17 @@ def list_workspace_group_options(
     return [
         GroupOption.model_validate(to_group_option(group))
         for group in list_group_options_for_actor(session, current_user)
+    ]
+
+
+@router.get("/organizations/options", response_model=list[OrganizationScopeOption])
+def list_workspace_organization_options(
+    session: DbSession,
+    current_user: User = Depends(get_current_user),
+):
+    return [
+        OrganizationScopeOption.model_validate(option)
+        for option in list_organization_scope_options(session, current_user)
     ]
 
 
@@ -159,7 +184,11 @@ async def create_workspace_skill(
     current_user: User = Depends(get_current_user),
     name: str = Form(...),
     description_markdown: str = Form(""),
+    scope_type: str = Form(default="PUBLIC"),
     group_id: str = Form(default=""),
+    scope_org_level: str = Form(default=""),
+    scope_org_name: str = Form(default=""),
+    scope_org_path: str = Form(default=""),
     zip_file: UploadFile = File(...),
 ):
     validated_name = validate_skill_name(name)
@@ -168,10 +197,29 @@ async def create_workspace_skill(
 
     zip_content = await validate_zip_file(zip_file)
     package_url = nexus_service.upload_skill_zip(validated_name, zip_content)
-    group = resolve_skill_group(session, current_user, _parse_group_id(group_id))
+    resolved_scope_type, group, resolved_org_level, resolved_org_name, resolved_org_path = resolve_skill_scope(
+        session,
+        current_user,
+        scope_type=scope_type,
+        group_id=_parse_group_id(group_id),
+        scope_org_level=_parse_optional_positive_int(scope_org_level, "scope_org_level"),
+        scope_org_name=scope_org_name,
+        scope_org_path=scope_org_path,
+    )
 
     try:
-        skill = create_skill(session, current_user, validated_name, description_markdown, package_url, group)
+        skill = create_skill(
+            session,
+            current_user,
+            validated_name,
+            description_markdown,
+            package_url,
+            scope_type=resolved_scope_type,
+            group=group,
+            scope_org_level=resolved_org_level,
+            scope_org_name=resolved_org_name,
+            scope_org_path=resolved_org_path,
+        )
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Skill 已存在") from exc
@@ -185,7 +233,11 @@ async def update_workspace_skill(
     session: DbSession,
     current_user: User = Depends(get_current_user),
     description_markdown: str = Form(""),
+    scope_type: str = Form(default="PUBLIC"),
     group_id: str = Form(default=""),
+    scope_org_level: str = Form(default=""),
+    scope_org_name: str = Form(default=""),
+    scope_org_path: str = Form(default=""),
     zip_file: UploadFile | None = File(default=None),
 ):
     validated_name = validate_skill_name(name)
@@ -197,9 +249,27 @@ async def update_workspace_skill(
     if zip_file is not None and zip_file.filename:
         zip_content = await validate_zip_file(zip_file)
         package_url = nexus_service.upload_skill_zip(validated_name, zip_content)
-    group = resolve_skill_group(session, current_user, _parse_group_id(group_id))
+    resolved_scope_type, group, resolved_org_level, resolved_org_name, resolved_org_path = resolve_skill_scope(
+        session,
+        current_user,
+        scope_type=scope_type,
+        group_id=_parse_group_id(group_id),
+        scope_org_level=_parse_optional_positive_int(scope_org_level, "scope_org_level"),
+        scope_org_name=scope_org_name,
+        scope_org_path=scope_org_path,
+    )
 
-    skill = update_skill(session, skill, description_markdown, package_url, group)
+    skill = update_skill(
+        session,
+        skill,
+        description_markdown,
+        package_url,
+        scope_type=resolved_scope_type,
+        group=group,
+        scope_org_level=resolved_org_level,
+        scope_org_name=resolved_org_name,
+        scope_org_path=resolved_org_path,
+    )
     versions = get_skill_versions(session, skill)
     return ManagedSkillDetail.model_validate(to_admin_skill_detail(skill, versions))
 

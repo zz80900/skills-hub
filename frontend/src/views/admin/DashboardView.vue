@@ -6,7 +6,7 @@ import SiteHeader from '../../components/SiteHeader.vue'
 import GroupManagementPanel from '../../components/user-center/GroupManagementPanel.vue'
 import SkillManagementPanel from '../../components/user-center/SkillManagementPanel.vue'
 import UserManagementPanel from '../../components/user-center/UserManagementPanel.vue'
-import { authState, fetchWorkspaceGroups, getUserDisplayName } from '../../services/api'
+import { authState, fetchWorkspaceGroups, getUserDisplayName, getUserOrganizationLevels } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,6 +49,7 @@ const centerSummary = computed(() => {
   }
   return '统一查看并管理 Skill、用户组与账号能力。'
 })
+const organizationLevels = computed(() => getUserOrganizationLevels(authState.user))
 
 function switchTab(nextTab) {
   if (!tabs.value.some((item) => item.key === nextTab)) {
@@ -106,6 +107,9 @@ onMounted(() => {
           <p class="eyebrow">用户中心</p>
           <h1>{{ userCenterLabel }}</h1>
           <p class="admin-toolbar__summary">{{ centerSummary }}</p>
+          <p v-if="organizationLevels.length" class="admin-toolbar__summary">
+            当前组织：{{ organizationLevels.join(' / ') }}
+          </p>
         </div>
         <div class="admin-toolbar__actions user-center-switches">
           <button

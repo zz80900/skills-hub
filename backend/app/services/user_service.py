@@ -13,6 +13,7 @@ from app.services.ad_auth import (
     ActiveDirectoryInvalidCredentialsError,
     ActiveDirectoryLookupError,
     authenticate_active_directory_user,
+    parse_organization_hierarchy,
 )
 
 
@@ -164,6 +165,13 @@ def create_user(
     source: str = USER_SOURCE_LOCAL,
     display_name: str | None = None,
     external_principal: str | None = None,
+    ad_distinguished_name: str | None = None,
+    org_level_1: str | None = None,
+    org_level_2: str | None = None,
+    org_level_3: str | None = None,
+    org_level_4: str | None = None,
+    org_path: str | None = None,
+    org_depth: int | None = None,
 ) -> User:
     role = get_role_by_name(session, role_name)
     if role is None:
@@ -178,6 +186,13 @@ def create_user(
         source=normalized_source,
         display_name=normalize_display_name(display_name),
         external_principal=normalize_external_principal(external_principal),
+        ad_distinguished_name=normalize_optional_text(ad_distinguished_name),
+        org_level_1=normalize_optional_text(org_level_1),
+        org_level_2=normalize_optional_text(org_level_2),
+        org_level_3=normalize_optional_text(org_level_3),
+        org_level_4=normalize_optional_text(org_level_4),
+        org_path=normalize_optional_text(org_path),
+        org_depth=normalize_org_depth(org_depth),
         is_active=is_active,
     )
     session.add(user)
@@ -255,6 +270,7 @@ def reset_user_password(session: Session, user: User, password: str) -> User:
 
 
 def provision_ad_user(session: Session, identity: ActiveDirectoryIdentity) -> User:
+    organization = parse_organization_hierarchy(identity.distinguished_name)
     existing_user = get_user_by_username(session, identity.username)
     if existing_user is not None:
         if existing_user.source != USER_SOURCE_AD:
@@ -274,6 +290,13 @@ def provision_ad_user(session: Session, identity: ActiveDirectoryIdentity) -> Us
             source=USER_SOURCE_AD,
             display_name=identity.display_name,
             external_principal=identity.external_principal or identity.principal,
+            ad_distinguished_name=organization.distinguished_name,
+            org_level_1=organization_level(organization, 0),
+            org_level_2=organization_level(organization, 1),
+            org_level_3=organization_level(organization, 2),
+            org_level_4=organization_level(organization, 3),
+            org_path=organization.path,
+            org_depth=organization.depth,
         )
     except IntegrityError as exc:
         session.rollback()
@@ -289,8 +312,16 @@ def sync_ad_user_profile(session: Session, user: User, identity: ActiveDirectory
             status_code=status.HTTP_409_CONFLICT,
             detail="用户来源与登录方式不匹配，请联系管理员处理",
         )
+    organization = parse_organization_hierarchy(identity.distinguished_name)
     user.display_name = normalize_display_name(identity.display_name)
     user.external_principal = normalize_external_principal(identity.external_principal or identity.principal)
+    user.ad_distinguished_name = normalize_optional_text(organization.distinguished_name)
+    user.org_level_1 = normalize_optional_text(organization_level(organization, 0))
+    user.org_level_2 = normalize_optional_text(organization_level(organization, 1))
+    user.org_level_3 = normalize_optional_text(organization_level(organization, 2))
+    user.org_level_4 = normalize_optional_text(organization_level(organization, 3))
+    user.org_path = normalize_optional_text(organization.path)
+    user.org_depth = normalize_org_depth(organization.depth)
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -318,6 +349,23 @@ def normalize_display_name(display_name: str | None) -> str | None:
     return normalized or None
 
 
+def normalize_optional_text(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized or None
+
+
+def normalize_org_depth(value: int | None) -> int | None:
+    if value is None:
+        return None
+    return max(0, int(value))
+
+
+def organization_level(organization, index: int) -> str | None:
+    if index < 0 or index >= len(organization.levels):
+        return None
+    return organization.levels[index]
+
+
 def normalize_external_principal(value: str | None) -> str | None:
     normalized = (value or "").strip()
     return normalized or None
@@ -330,6 +378,13 @@ def to_authenticated_user(user: User) -> dict[str, Any]:
         "role": user.role.name,
         "source": user.source,
         "display_name": user.display_name,
+        "ad_distinguished_name": user.ad_distinguished_name,
+        "org_level_1": user.org_level_1,
+        "org_level_2": user.org_level_2,
+        "org_level_3": user.org_level_3,
+        "org_level_4": user.org_level_4,
+        "org_path": user.org_path,
+        "org_depth": user.org_depth,
     }
 
 
@@ -341,6 +396,13 @@ def to_user_summary(user: User) -> dict[str, Any]:
         "source": user.source,
         "display_name": user.display_name,
         "external_principal": user.external_principal,
+        "ad_distinguished_name": user.ad_distinguished_name,
+        "org_level_1": user.org_level_1,
+        "org_level_2": user.org_level_2,
+        "org_level_3": user.org_level_3,
+        "org_level_4": user.org_level_4,
+        "org_path": user.org_path,
+        "org_depth": user.org_depth,
         "is_active": user.is_active,
         "created_at": user.created_at,
         "updated_at": user.updated_at,

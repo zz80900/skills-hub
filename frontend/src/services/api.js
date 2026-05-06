@@ -25,11 +25,7 @@ function readUser() {
     if (typeof parsed.id !== 'number' || typeof parsed.username !== 'string' || typeof parsed.role !== 'string') {
       return null
     }
-    return {
-      ...parsed,
-      source: typeof parsed.source === 'string' ? parsed.source : 'LOCAL',
-      display_name: typeof parsed.display_name === 'string' && parsed.display_name.trim() ? parsed.display_name : null,
-    }
+    return normalizeUserPayload(parsed)
   } catch {
     return null
   }
@@ -76,6 +72,82 @@ function normalizeContributor(value) {
   return ''
 }
 
+function normalizeOptionalText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function normalizeUserPayload(user) {
+  if (!user || typeof user !== 'object') {
+    return user
+  }
+  const orgLevels = [
+    normalizeOptionalText(user.org_level_1),
+    normalizeOptionalText(user.org_level_2),
+    normalizeOptionalText(user.org_level_3),
+    normalizeOptionalText(user.org_level_4),
+  ]
+  const orgPath = normalizeOptionalText(user.org_path) || orgLevels.filter(Boolean).join(' / ') || null
+  return {
+    ...user,
+    source: typeof user.source === 'string' ? user.source : 'LOCAL',
+    display_name: normalizeOptionalText(user.display_name),
+    ad_distinguished_name: normalizeOptionalText(user.ad_distinguished_name),
+    org_level_1: orgLevels[0],
+    org_level_2: orgLevels[1],
+    org_level_3: orgLevels[2],
+    org_level_4: orgLevels[3],
+    org_path: orgPath,
+    org_depth: typeof user.org_depth === 'number' ? user.org_depth : orgLevels.filter(Boolean).length || null,
+  }
+}
+
+function normalizeScopeType(value, groupId) {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : ''
+  if (['PUBLIC', 'GROUP', 'ORGANIZATION'].includes(normalized)) {
+    return normalized
+  }
+  return groupId ? 'GROUP' : 'PUBLIC'
+}
+
+export function getUserOrganizationLevels(user) {
+  return [
+    user?.org_level_1,
+    user?.org_level_2,
+    user?.org_level_3,
+    user?.org_level_4,
+  ].filter((item) => typeof item === 'string' && item.trim())
+}
+
+export function getSkillScopeLabel(skill) {
+  if (!skill) {
+    return '公开'
+  }
+  if (normalizeOptionalText(skill.scope_label)) {
+    return skill.scope_label.trim()
+  }
+  const scopeType = normalizeScopeType(skill.scope_type, skill.group_id)
+  if (scopeType === 'GROUP') {
+    return `组内 · ${skill.group_name || skill.group_id || '-'}`
+  }
+  if (scopeType === 'ORGANIZATION') {
+    return `部门内 · ${skill.scope_org_path || skill.scope_org_name || '-'}`
+  }
+  return '公开'
+}
+
+function normalizeOrganizationOption(option) {
+  if (!option || typeof option !== 'object') {
+    return option
+  }
+  return {
+    ...option,
+    level: Number(option.level) || null,
+    name: normalizeOptionalText(option.name) || '',
+    path: normalizeOptionalText(option.path) || '',
+    is_leaf: typeof option.is_leaf === 'boolean' ? option.is_leaf : true,
+  }
+}
+
 function normalizeSkillPayload(payload) {
   if (!payload || typeof payload !== 'object') {
     return payload
@@ -84,7 +156,12 @@ function normalizeSkillPayload(payload) {
   const normalized = {
     ...payload,
     contributor: normalizeContributor(payload.contributor) || null,
+    scope_type: normalizeScopeType(payload.scope_type, payload.group_id),
+    scope_label: getSkillScopeLabel(payload),
+    scope_org_name: normalizeOptionalText(payload.scope_org_name),
+    scope_org_path: normalizeOptionalText(payload.scope_org_path),
   }
+  normalized.scope_org_level = payload.scope_org_level == null ? null : Number(payload.scope_org_level) || null
 
   if (Array.isArray(payload.version_history)) {
     normalized.version_history = payload.version_history.map((item) => ({
@@ -200,10 +277,11 @@ export function getUserDisplayName(user) {
 }
 
 export function setSession(token, user) {
+  const normalizedUser = normalizeUserPayload(user)
   authState.token = token
-  authState.user = user
+  authState.user = normalizedUser
   window.localStorage.setItem(TOKEN_KEY, token)
-  window.localStorage.setItem(USER_KEY, JSON.stringify(user))
+  window.localStorage.setItem(USER_KEY, JSON.stringify(normalizedUser))
 }
 
 export function clearSession() {
@@ -273,8 +351,8 @@ export function logout() {
   return request(buildUrl('/api/auth/logout'), { method: 'POST', authMode: AUTH_MODE_REQUIRED })
 }
 
-export function fetchCurrentUser() {
-  return request(buildUrl('/api/auth/me'), { authMode: AUTH_MODE_REQUIRED })
+export async function fetchCurrentUser() {
+  return normalizeUserPayload(await request(buildUrl('/api/auth/me'), { authMode: AUTH_MODE_REQUIRED }))
 }
 
 export async function fetchWorkspaceSkills(query) {
@@ -376,6 +454,12 @@ export async function fetchWorkspaceGroups() {
 
 export async function fetchGroupOptions() {
   return await request(buildUrl('/api/workspace/groups/options'), { authMode: AUTH_MODE_REQUIRED })
+}
+
+export async function fetchOrganizationOptions() {
+  return (await request(buildUrl('/api/workspace/organizations/options'), { authMode: AUTH_MODE_REQUIRED }))
+    .map(normalizeOrganizationOption)
+    .filter((option) => option?.path && option?.level)
 }
 
 export async function fetchGroupMemberOptions() {

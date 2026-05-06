@@ -47,6 +47,14 @@ class ActiveDirectoryIdentity:
     attributes: dict[str, list[str]]
 
 
+@dataclass(slots=True, frozen=True)
+class OrganizationHierarchy:
+    distinguished_name: str
+    levels: tuple[str, ...]
+    path: str
+    depth: int
+
+
 def authenticate_active_directory_user(username: str, password: str) -> ActiveDirectoryIdentity:
     authenticator = ActiveDirectoryAuthenticator(get_settings())
     return authenticator.authenticate(username, password)
@@ -257,6 +265,37 @@ def normalize_account_name(username: str) -> str:
 def normalize_principal(username: str, realm: str) -> str:
     account_name = normalize_account_name(username)
     return f"{account_name}@{(realm or '').strip().upper()}"
+
+
+def parse_organization_hierarchy(distinguished_name: str, *, max_levels: int = 4) -> OrganizationHierarchy:
+    normalized_dn = (distinguished_name or "").strip()
+    if not normalized_dn:
+        return OrganizationHierarchy(distinguished_name="", levels=tuple(), path="", depth=0)
+
+    raw_ou_values: list[str] = []
+    for segment in normalized_dn.split(","):
+        part = segment.strip()
+        if not part or "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        if key.strip().upper() != "OU":
+            continue
+        normalized_value = value.strip()
+        if normalized_value:
+            raw_ou_values.append(normalized_value)
+
+    if not raw_ou_values:
+        return OrganizationHierarchy(distinguished_name=normalized_dn, levels=tuple(), path="", depth=0)
+
+    ordered_levels = list(reversed(raw_ou_values))
+    business_levels = ordered_levels[1:] if len(ordered_levels) > 1 else ordered_levels
+    effective_levels = tuple(business_levels[:max_levels])
+    return OrganizationHierarchy(
+        distinguished_name=normalized_dn,
+        levels=effective_levels,
+        path=" / ".join(effective_levels),
+        depth=len(effective_levels),
+    )
 
 
 def build_ldap_service_bind_principals(

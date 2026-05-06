@@ -1,9 +1,9 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
-import { authState, createSkill, fetchGroupOptions, fetchWorkspaceSkill, updateSkill } from '../../services/api'
+import { authState, createSkill, fetchGroupOptions, fetchOrganizationOptions, fetchWorkspaceSkill, updateSkill } from '../../services/api'
 
 const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const route = useRoute()
@@ -19,13 +19,29 @@ const showZipGuidance = ref(false)
 const groupOptionsLoading = ref(false)
 const groupOptionsError = ref('')
 const groupOptions = ref([])
+const organizationOptionsLoading = ref(false)
+const organizationOptionsError = ref('')
+const organizationOptions = ref([])
+const scopeOptions = [
+  { value: 'PUBLIC', label: '公开可见' },
+  { value: 'GROUP', label: '归属组可见' },
+  { value: 'ORGANIZATION', label: '归属组织可见' },
+]
 const form = reactive({
   name: '',
   contributor: '',
   description_markdown: '',
+  scope_type: 'PUBLIC',
   group_id: '',
+  scope_org_level: '',
+  scope_org_name: '',
+  scope_org_path: '',
   zip_file: null,
 })
+
+const selectedOrganization = computed(() =>
+  organizationOptions.value.find((item) => item.path === form.scope_org_path) || null,
+)
 
 function onFileChange(event) {
   const [file] = event.target.files || []
@@ -75,6 +91,59 @@ async function loadGroupOptions() {
   }
 }
 
+async function loadOrganizationOptions() {
+  organizationOptionsLoading.value = true
+  organizationOptionsError.value = ''
+  try {
+    organizationOptions.value = await fetchOrganizationOptions()
+  } catch (err) {
+    organizationOptionsError.value = err.message
+  } finally {
+    organizationOptionsLoading.value = false
+  }
+}
+
+function syncOrganizationSelection() {
+  form.scope_org_level = selectedOrganization.value ? String(selectedOrganization.value.level) : ''
+  form.scope_org_name = selectedOrganization.value?.name || ''
+}
+
+function selectScopeType(scopeType) {
+  form.scope_type = scopeType
+}
+
+function selectGroup(group) {
+  form.group_id = String(group.id)
+}
+
+function selectOrganization(option) {
+  form.scope_org_path = option.path
+  form.scope_org_level = String(option.level)
+  form.scope_org_name = option.name
+}
+
+function resetGroupScope() {
+  form.group_id = ''
+}
+
+function resetOrganizationScope() {
+  form.scope_org_level = ''
+  form.scope_org_name = ''
+  form.scope_org_path = ''
+}
+
+function validateScope() {
+  if (form.scope_type === 'GROUP' && !form.group_id) {
+    throw new Error('请选择归属组')
+  }
+  if (form.scope_type === 'ORGANIZATION') {
+    syncOrganizationSelection()
+    if (!form.scope_org_level || !form.scope_org_name || !form.scope_org_path) {
+      throw new Error('请选择归属组织')
+    }
+  }
+}
+
 async function loadSkill() {
   if (!isEditMode.value) {
     return
@@ -86,7 +155,11 @@ async function loadSkill() {
     form.name = skill.name
     form.contributor = skill.contributor || ''
     form.description_markdown = skill.description_markdown
+    form.scope_type = skill.scope_type || (skill.group_id ? 'GROUP' : 'PUBLIC')
     form.group_id = skill.group_id ? String(skill.group_id) : ''
+    form.scope_org_level = skill.scope_org_level ? String(skill.scope_org_level) : ''
+    form.scope_org_name = skill.scope_org_name || ''
+    form.scope_org_path = skill.scope_org_path || ''
     currentVersion.value = skill.current_version
     if (skill.group_id) {
       mergeGroupOption({
@@ -109,8 +182,13 @@ async function handleSubmit() {
   error.value = ''
   try {
     const payload = new FormData()
+    validateScope()
     payload.append('description_markdown', form.description_markdown)
-    payload.append('group_id', form.group_id || '')
+    payload.append('scope_type', form.scope_type || 'PUBLIC')
+    payload.append('group_id', form.scope_type === 'GROUP' ? form.group_id : '')
+    payload.append('scope_org_level', form.scope_type === 'ORGANIZATION' ? form.scope_org_level : '')
+    payload.append('scope_org_name', form.scope_type === 'ORGANIZATION' ? form.scope_org_name : '')
+    payload.append('scope_org_path', form.scope_type === 'ORGANIZATION' ? form.scope_org_path : '')
     const validatedName = validateSkillName(form.name)
 
     if (isEditMode.value) {
@@ -137,8 +215,25 @@ async function handleSubmit() {
 
 onMounted(() => {
   loadGroupOptions()
+  loadOrganizationOptions()
   loadSkill()
 })
+
+watch(
+  () => form.scope_type,
+  (scopeType) => {
+    if (scopeType === 'GROUP') {
+      resetOrganizationScope()
+      return
+    }
+    if (scopeType === 'ORGANIZATION') {
+      resetGroupScope()
+      return
+    }
+    resetGroupScope()
+    resetOrganizationScope()
+  },
+)
 </script>
 
 <template>
@@ -190,21 +285,75 @@ onMounted(() => {
             />
           </label>
 
-          <label class="field">
-            <span>归属组</span>
-            <select v-model="form.group_id" class="text-input" :disabled="groupOptionsLoading">
-              <option value="">公开（不绑定组）</option>
-              <option v-for="group in groupOptions" :key="group.id" :value="String(group.id)">
-                {{ group.name }}
-              </option>
-            </select>
+          <div class="field">
+            <span>可见范围</span>
+            <div class="scope-picker" role="radiogroup" aria-label="可见范围">
+              <button
+                v-for="option in scopeOptions"
+                :key="option.value"
+                type="button"
+                class="scope-tag"
+                :class="{ 'scope-tag--active': form.scope_type === option.value }"
+                :aria-checked="form.scope_type === option.value ? 'true' : 'false'"
+                role="radio"
+                @click="selectScopeType(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
             <small class="field__hint">
-              {{ form.group_id ? '绑定组后，仅该组成员和管理员可在首页查看。' : '不绑定组时，Skill 会继续公开展示。' }}
+              {{
+                form.scope_type === 'GROUP'
+                  ? '绑定组后，仅该组成员和管理员可在首页查看。'
+                  : form.scope_type === 'ORGANIZATION'
+                    ? '绑定组织后，该组织及其子组织成员和管理员可在首页查看。'
+                    : '不绑定范围时，Skill 会继续公开展示。'
+              }}
             </small>
+          </div>
+
+          <div v-if="form.scope_type === 'GROUP'" class="field">
+            <span>归属组</span>
+            <div v-if="groupOptions.length" class="scope-option-list" aria-label="归属组">
+              <button
+                v-for="group in groupOptions"
+                :key="group.id"
+                type="button"
+                class="scope-option-tag"
+                :class="{ 'scope-option-tag--active': form.group_id === String(group.id) }"
+                :disabled="groupOptionsLoading"
+                @click="selectGroup(group)"
+              >
+                {{ group.name }}
+              </button>
+            </div>
             <small v-if="groupOptionsLoading">正在加载可选组...</small>
             <small v-else-if="groupOptionsError" class="feedback feedback--error feedback--inline">{{ groupOptionsError }}</small>
-            <small v-else-if="!groupOptions.length">当前没有可选组，可继续创建公开 Skill。</small>
-          </label>
+            <small v-else-if="!groupOptions.length">当前没有可选组。</small>
+          </div>
+
+          <div v-if="form.scope_type === 'ORGANIZATION'" class="field">
+            <span>归属组织</span>
+            <div v-if="organizationOptions.length" class="scope-option-list" aria-label="归属组织">
+              <button
+                v-for="option in organizationOptions"
+                :key="option.path"
+                type="button"
+                class="scope-option-tag"
+                :class="{ 'scope-option-tag--active': form.scope_org_path === option.path }"
+                :disabled="organizationOptionsLoading"
+                @click="selectOrganization(option)"
+              >
+                {{ option.path }}{{ option.is_leaf ? '' : '（上级组织）' }}
+              </button>
+            </div>
+            <small v-if="selectedOrganization">
+              当前选择：{{ selectedOrganization.level }} 级组织 · {{ selectedOrganization.name }}
+            </small>
+            <small v-if="organizationOptionsLoading">正在加载可选组织...</small>
+            <small v-else-if="organizationOptionsError" class="feedback feedback--error feedback--inline">{{ organizationOptionsError }}</small>
+            <small v-else-if="!organizationOptions.length">当前没有可选组织，可能该账号尚未同步 AD 组织架构。</small>
+          </div>
 
           <div class="field">
             <div class="field__label field__label--with-action">

@@ -1213,6 +1213,69 @@ pre {
   line-height: 1.6;
 }
 
+.scope-picker,
+.scope-option-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.scope-tag,
+.scope-option-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid rgba(22, 48, 70, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-align: center;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.scope-option-tag {
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 0.86rem;
+}
+
+.scope-tag:hover,
+.scope-option-tag:hover {
+  border-color: rgba(30, 215, 96, 0.36);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.scope-tag:focus-visible,
+.scope-option-tag:focus-visible {
+  outline: 2px solid rgba(30, 215, 96, 0.42);
+  outline-offset: 3px;
+}
+
+.scope-tag--active,
+.scope-option-tag--active {
+  border-color: rgba(30, 215, 96, 0.5);
+  background: #1ed760;
+  color: #07130b;
+  box-shadow: 0 10px 22px rgba(30, 215, 96, 0.18);
+}
+
+.scope-tag:disabled,
+.scope-option-tag:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+  transform: none;
+}
+
 .field-help__button {
   display: inline-flex;
   align-items: center;
@@ -2207,6 +2270,27 @@ small,
 
 .field-help__button:focus-visible {
   outline: 2px solid rgba(30, 215, 96, 0.22);
+}
+
+.scope-tag,
+.scope-option-tag {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #1f1f1f;
+  color: var(--text-soft);
+}
+
+.scope-tag:hover,
+.scope-option-tag:hover {
+  border-color: rgba(30, 215, 96, 0.34);
+  color: #ffffff;
+}
+
+.scope-tag--active,
+.scope-option-tag--active {
+  border-color: transparent;
+  background: #1ed760;
+  color: #000000;
+  box-shadow: 0 14px 26px rgba(30, 215, 96, 0.2);
 }
 
 .zip-guidance {

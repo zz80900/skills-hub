@@ -18,11 +18,22 @@ SKILL_COLUMNS = {
     "deleted_at": "ALTER TABLE skills ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE",
     "group_id": "ALTER TABLE skills ADD COLUMN group_id INTEGER",
     "owner_id": "ALTER TABLE skills ADD COLUMN owner_id INTEGER",
+    "scope_type": "ALTER TABLE skills ADD COLUMN scope_type VARCHAR(16) NOT NULL DEFAULT 'PUBLIC'",
+    "scope_org_level": "ALTER TABLE skills ADD COLUMN scope_org_level INTEGER",
+    "scope_org_name": "ALTER TABLE skills ADD COLUMN scope_org_name VARCHAR(128)",
+    "scope_org_path": "ALTER TABLE skills ADD COLUMN scope_org_path VARCHAR(512)",
 }
 USER_COLUMNS = {
     "source": f"ALTER TABLE users ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT '{USER_SOURCE_LOCAL}'",
     "display_name": "ALTER TABLE users ADD COLUMN display_name VARCHAR(128)",
     "external_principal": "ALTER TABLE users ADD COLUMN external_principal VARCHAR(255)",
+    "ad_distinguished_name": "ALTER TABLE users ADD COLUMN ad_distinguished_name VARCHAR(1024)",
+    "org_level_1": "ALTER TABLE users ADD COLUMN org_level_1 VARCHAR(128)",
+    "org_level_2": "ALTER TABLE users ADD COLUMN org_level_2 VARCHAR(128)",
+    "org_level_3": "ALTER TABLE users ADD COLUMN org_level_3 VARCHAR(128)",
+    "org_level_4": "ALTER TABLE users ADD COLUMN org_level_4 VARCHAR(128)",
+    "org_path": "ALTER TABLE users ADD COLUMN org_path VARCHAR(512)",
+    "org_depth": "ALTER TABLE users ADD COLUMN org_depth INTEGER",
 }
 
 
@@ -44,6 +55,7 @@ def ensure_schema_compatibility(engine: Engine) -> None:
     _ensure_skill_columns(engine, inspector)
     _backfill_skill_versions(engine)
     _backfill_skill_owners(engine, default_admin_id)
+    _backfill_skill_scope_types(engine)
     _ensure_group_leader_memberships(engine)
     _ensure_skill_name_uniqueness_policy(engine)
     _ensure_skill_indexes(engine)
@@ -217,6 +229,31 @@ def _backfill_skill_owners(engine: Engine, default_admin_id: int) -> None:
                 """
             ),
             {"owner_id": default_admin_id},
+        )
+
+
+def _backfill_skill_scope_types(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE skills
+                SET scope_type = CASE
+                    WHEN group_id IS NOT NULL THEN 'GROUP'
+                    ELSE 'PUBLIC'
+                END
+                WHERE scope_type IS NULL OR TRIM(scope_type) = ''
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE skills
+                SET scope_type = 'GROUP'
+                WHERE group_id IS NOT NULL AND scope_type = 'PUBLIC'
+                """
+            )
         )
 
 

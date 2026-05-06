@@ -6,6 +6,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
+SKILL_SCOPE_PUBLIC = "PUBLIC"
+SKILL_SCOPE_GROUP = "GROUP"
+SKILL_SCOPE_ORGANIZATION = "ORGANIZATION"
+
+
 class Skill(Base):
     __tablename__ = "skills"
     __table_args__ = (
@@ -22,6 +27,15 @@ class Skill(Base):
     name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True, index=True)
+    scope_type: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=SKILL_SCOPE_PUBLIC,
+        server_default=SKILL_SCOPE_PUBLIC,
+    )
+    scope_org_level: Mapped[int | None] = mapped_column(nullable=True)
+    scope_org_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    scope_org_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     description_markdown: Mapped[str] = mapped_column(Text, nullable=False, default="")
     description_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
     contributor: Mapped[str | None] = mapped_column(String(128), nullable=True)

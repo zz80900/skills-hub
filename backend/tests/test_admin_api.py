@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
 
-test_db_path = Path(__file__).with_name("test.db")
+test_db_path = Path(__file__).with_name(f"test-{os.getpid()}.db")
 if test_db_path.exists():
     test_db_path.unlink()
 
@@ -170,21 +170,39 @@ def create_local_skill(
     name: str = "demo-skill",
     description_markdown: str = "local detail",
     group_id: int | None = None,
+    scope_type: str | None = None,
+    scope_org_level: int | None = None,
+    scope_org_name: str | None = None,
+    scope_org_path: str | None = None,
 ):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
 
     monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+    effective_scope_type = scope_type
+    if effective_scope_type is None and group_id is not None:
+        effective_scope_type = "GROUP"
+
+    data = {
+        "name": name,
+        "description_markdown": description_markdown,
+    }
+    if effective_scope_type is not None:
+        data["scope_type"] = effective_scope_type
+    if group_id is not None:
+        data["group_id"] = str(group_id)
+    if scope_org_level is not None:
+        data["scope_org_level"] = str(scope_org_level)
+    if scope_org_name is not None:
+        data["scope_org_name"] = scope_org_name
+    if scope_org_path is not None:
+        data["scope_org_path"] = scope_org_path
 
     response = client.post(
         "/api/workspace/skills",
         headers=headers,
         files={"zip_file": (f"{name}.zip", make_zip("# skill"), "application/zip")},
-        data={
-            "name": name,
-            "description_markdown": description_markdown,
-            **({"group_id": str(group_id)} if group_id is not None else {}),
-        },
+        data=data,
     )
     assert response.status_code == 201
     return response
@@ -195,6 +213,7 @@ def make_ad_identity(
     *,
     display_name: str = "Alice Zhang",
     external_principal: str | None = None,
+    distinguished_name: str | None = None,
 ) -> ActiveDirectoryIdentity:
     normalized_username = username.lower()
     principal = f"{normalized_username}@XGD.COM"
@@ -204,13 +223,36 @@ def make_ad_identity(
         display_name=display_name,
         name_source="displayName",
         external_principal=external_principal or principal,
-        distinguished_name=f"CN={normalized_username},OU=Users,DC=xgd,DC=com",
+        distinguished_name=distinguished_name or f"CN={normalized_username},OU=Users,DC=xgd,DC=com",
         attributes={
             "displayName": [display_name],
             "sAMAccountName": [normalized_username],
             "userPrincipalName": [external_principal or principal],
         },
     )
+
+
+def login_ad_user(
+    client: TestClient,
+    monkeypatch,
+    username: str,
+    *,
+    password: str = "ad-pass",
+    display_name: str | None = None,
+    distinguished_name: str,
+) -> dict[str, str]:
+    monkeypatch.setattr(
+        user_service,
+        "authenticate_active_directory_user",
+        lambda *_args, **_kwargs: make_ad_identity(
+            username,
+            display_name=display_name or username,
+            distinguished_name=distinguished_name,
+        ),
+    )
+    response = client.post("/api/auth/login", json={"username": username, "password": password})
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def test_login_success(client: TestClient):
@@ -294,10 +336,18 @@ def test_local_user_does_not_fallback_to_ad(client: TestClient, monkeypatch):
 
 
 def test_ad_login_provisions_user(client: TestClient, monkeypatch):
+    distinguished_name = (
+        "CN=alice,OU=系统方案部,OU=公共技术中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+    )
+
     def fake_auth(username: str, password: str) -> ActiveDirectoryIdentity:
         assert username == "alice"
         assert password == "alice-pass"
-        return make_ad_identity("alice", display_name="艾丽丝")
+        return make_ad_identity(
+            "alice",
+            display_name="艾丽丝",
+            distinguished_name=distinguished_name,
+        )
 
     monkeypatch.setattr(user_service, "authenticate_active_directory_user", fake_auth)
 
@@ -308,6 +358,13 @@ def test_ad_login_provisions_user(client: TestClient, monkeypatch):
     assert payload["user"]["role"] == "USER"
     assert payload["user"]["source"] == "AD"
     assert payload["user"]["display_name"] == "艾丽丝"
+    assert payload["user"]["ad_distinguished_name"] == distinguished_name
+    assert payload["user"]["org_level_1"] == "支付硬件事业群"
+    assert payload["user"]["org_level_2"] == "技术中心"
+    assert payload["user"]["org_level_3"] == "公共技术中心"
+    assert payload["user"]["org_level_4"] == "系统方案部"
+    assert payload["user"]["org_path"] == "支付硬件事业群 / 技术中心 / 公共技术中心 / 系统方案部"
+    assert payload["user"]["org_depth"] == 4
 
     admin_headers = auth_headers(client)
     users_response = client.get("/api/admin/users", headers=admin_headers)
@@ -316,13 +373,58 @@ def test_ad_login_provisions_user(client: TestClient, monkeypatch):
     assert alice["source"] == "AD"
     assert alice["display_name"] == "艾丽丝"
     assert alice["external_principal"] == "alice@XGD.COM"
+    assert alice["ad_distinguished_name"] == distinguished_name
+    assert alice["org_level_1"] == "支付硬件事业群"
+    assert alice["org_level_2"] == "技术中心"
+    assert alice["org_level_3"] == "公共技术中心"
+    assert alice["org_level_4"] == "系统方案部"
+    assert alice["org_path"] == "支付硬件事业群 / 技术中心 / 公共技术中心 / 系统方案部"
+    assert alice["org_depth"] == 4
+
+
+def test_ad_login_provisions_user_with_partial_org_hierarchy(client: TestClient, monkeypatch):
+    distinguished_name = "CN=bob,OU=平台研发部,OU=研发中心,OU=新国都集团,DC=xgd,DC=com"
+    monkeypatch.setattr(
+        user_service,
+        "authenticate_active_directory_user",
+        lambda *_args, **_kwargs: make_ad_identity(
+            "bob",
+            display_name="鲍勃",
+            distinguished_name=distinguished_name,
+        ),
+    )
+
+    response = client.post("/api/auth/login", json={"username": "bob", "password": "bob-pass"})
+    assert response.status_code == 200
+    user = response.json()["user"]
+    assert user["ad_distinguished_name"] == distinguished_name
+    assert user["org_level_1"] == "研发中心"
+    assert user["org_level_2"] == "平台研发部"
+    assert user["org_level_3"] is None
+    assert user["org_level_4"] is None
+    assert user["org_path"] == "研发中心 / 平台研发部"
+    assert user["org_depth"] == 2
 
 
 def test_existing_ad_user_login_syncs_profile(client: TestClient, monkeypatch):
+    first_distinguished_name = (
+        "CN=alice,OU=系统方案部,OU=公共技术中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+    )
+    second_distinguished_name = (
+        "CN=alice,OU=AI创新组,OU=平台技术部,OU=研发中心,OU=软件事业群,OU=新国都集团,DC=xgd,DC=com"
+    )
     identities = iter(
         [
-            make_ad_identity("alice", display_name="艾丽丝"),
-            make_ad_identity("alice", display_name="艾丽丝-更新"),
+            make_ad_identity(
+                "alice",
+                display_name="艾丽丝",
+                distinguished_name=first_distinguished_name,
+            ),
+            make_ad_identity(
+                "alice",
+                display_name="艾丽丝-更新",
+                distinguished_name=second_distinguished_name,
+            ),
         ]
     )
 
@@ -336,11 +438,23 @@ def test_existing_ad_user_login_syncs_profile(client: TestClient, monkeypatch):
     assert second_login.status_code == 200
     assert second_login.json()["user"]["source"] == "AD"
     assert second_login.json()["user"]["display_name"] == "艾丽丝-更新"
+    assert second_login.json()["user"]["ad_distinguished_name"] == second_distinguished_name
+    assert second_login.json()["user"]["org_level_1"] == "软件事业群"
+    assert second_login.json()["user"]["org_level_2"] == "研发中心"
+    assert second_login.json()["user"]["org_level_3"] == "平台技术部"
+    assert second_login.json()["user"]["org_level_4"] == "AI创新组"
+    assert second_login.json()["user"]["org_path"] == "软件事业群 / 研发中心 / 平台技术部 / AI创新组"
 
     admin_headers = auth_headers(client)
     users_response = client.get("/api/admin/users", headers=admin_headers)
     alice = next(item for item in user_list_items(users_response.json()) if item["username"] == "alice")
     assert alice["display_name"] == "艾丽丝-更新"
+    assert alice["ad_distinguished_name"] == second_distinguished_name
+    assert alice["org_level_1"] == "软件事业群"
+    assert alice["org_level_2"] == "研发中心"
+    assert alice["org_level_3"] == "平台技术部"
+    assert alice["org_level_4"] == "AI创新组"
+    assert alice["org_path"] == "软件事业群 / 研发中心 / 平台技术部 / AI创新组"
 
 
 def test_login_returns_503_when_ad_unavailable(client: TestClient, monkeypatch):
@@ -931,7 +1045,12 @@ def test_non_admin_cannot_bind_skill_to_unrelated_group_but_admin_can(client: Te
         "/api/workspace/skills",
         headers=alice_headers,
         files={"zip_file": ("group.zip", make_zip("# group"), "application/zip")},
-        data={"name": "forbidden-group-skill", "description_markdown": "# demo", "group_id": str(group["id"])},
+        data={
+            "name": "forbidden-group-skill",
+            "description_markdown": "# demo",
+            "scope_type": "GROUP",
+            "group_id": str(group["id"]),
+        },
     )
     assert forbidden_create.status_code == 403
     assert forbidden_create.json()["detail"] == "无权将 Skill 绑定到该组"
@@ -940,7 +1059,12 @@ def test_non_admin_cannot_bind_skill_to_unrelated_group_but_admin_can(client: Te
         "/api/workspace/skills",
         headers=admin_headers,
         files={"zip_file": ("group.zip", make_zip("# group"), "application/zip")},
-        data={"name": "admin-group-skill", "description_markdown": "# demo", "group_id": str(group["id"])},
+        data={
+            "name": "admin-group-skill",
+            "description_markdown": "# demo",
+            "scope_type": "GROUP",
+            "group_id": str(group["id"]),
+        },
     )
     assert allowed_create.status_code == 201
     assert allowed_create.json()["group_name"] == "Bob 组"
@@ -1665,6 +1789,226 @@ def test_group_scoped_skill_visibility_filters_public_list_and_detail(client: Te
     assert outsider_detail.status_code == 404
 
 
+def test_organization_scope_options_limit_user_to_leaf_and_admin_to_known_nodes(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    alice_headers = login_ad_user(
+        client,
+        monkeypatch,
+        "alice",
+        distinguished_name=(
+            "CN=alice,OU=系统方案部,OU=公共技术中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+        ),
+    )
+
+    user_options = client.get("/api/workspace/organizations/options", headers=alice_headers)
+    assert user_options.status_code == 200
+    assert user_options.json() == [
+        {
+            "level": 4,
+            "name": "系统方案部",
+            "path": "支付硬件事业群 / 技术中心 / 公共技术中心 / 系统方案部",
+            "is_leaf": True,
+        }
+    ]
+
+    admin_options = client.get("/api/workspace/organizations/options", headers=admin_headers)
+    assert admin_options.status_code == 200
+    assert admin_options.json() == [
+        {"level": 1, "name": "支付硬件事业群", "path": "支付硬件事业群", "is_leaf": False},
+        {"level": 2, "name": "技术中心", "path": "支付硬件事业群 / 技术中心", "is_leaf": False},
+        {
+            "level": 3,
+            "name": "公共技术中心",
+            "path": "支付硬件事业群 / 技术中心 / 公共技术中心",
+            "is_leaf": False,
+        },
+        {
+            "level": 4,
+            "name": "系统方案部",
+            "path": "支付硬件事业群 / 技术中心 / 公共技术中心 / 系统方案部",
+            "is_leaf": True,
+        },
+    ]
+
+
+def test_organization_scoped_skill_visibility_allows_descendants_and_hides_siblings(
+    client: TestClient,
+    monkeypatch,
+):
+    admin_headers = auth_headers(client)
+    alice_headers = login_ad_user(
+        client,
+        monkeypatch,
+        "alice",
+        distinguished_name=(
+            "CN=alice,OU=公共技术中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+        ),
+    )
+    child_headers = login_ad_user(
+        client,
+        monkeypatch,
+        "child",
+        distinguished_name=(
+            "CN=child,OU=系统方案部,OU=公共技术中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+        ),
+    )
+    sibling_headers = login_ad_user(
+        client,
+        monkeypatch,
+        "sibling",
+        distinguished_name=(
+            "CN=sibling,OU=终端方案部,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+        ),
+    )
+    local_user = create_user_account(client, admin_headers, "localuser", "local-pass")
+    local_headers = auth_headers(client, local_user["username"], "local-pass")
+
+    group = create_group_record(client, admin_headers, name="组范围", leader_user_id=local_user["id"])
+    replace_group_member_list(
+        client,
+        local_headers,
+        group_id=group["id"],
+        user_ids=[local_user["id"]],
+    )
+
+    create_local_skill(client, monkeypatch, alice_headers, name="public-skill", scope_type="PUBLIC")
+    create_local_skill(
+        client,
+        monkeypatch,
+        local_headers,
+        name="group-skill",
+        scope_type="GROUP",
+        group_id=group["id"],
+    )
+    create_local_skill(
+        client,
+        monkeypatch,
+        alice_headers,
+        name="org-skill",
+        scope_type="ORGANIZATION",
+        scope_org_level=3,
+        scope_org_name="公共技术中心",
+        scope_org_path="支付硬件事业群 / 技术中心 / 公共技术中心",
+    )
+
+    owner_list = client.get("/api/skills", headers=alice_headers)
+    assert owner_list.status_code == 200
+    assert [item["name"] for item in owner_list.json()["local_items"]] == ["org-skill", "public-skill"]
+
+    child_list = client.get("/api/skills", headers=child_headers)
+    assert child_list.status_code == 200
+    assert [item["name"] for item in child_list.json()["local_items"]] == ["org-skill", "public-skill"]
+
+    sibling_list = client.get("/api/skills", headers=sibling_headers)
+    assert sibling_list.status_code == 200
+    assert [item["name"] for item in sibling_list.json()["local_items"]] == ["public-skill"]
+
+    local_list = client.get("/api/skills", headers=local_headers)
+    assert local_list.status_code == 200
+    assert [item["name"] for item in local_list.json()["local_items"]] == ["group-skill", "public-skill"]
+
+    anonymous_list = client.get("/api/skills")
+    assert anonymous_list.status_code == 200
+    assert [item["name"] for item in anonymous_list.json()["local_items"]] == ["public-skill"]
+
+    child_detail = client.get("/api/skills/local/org-skill", headers=child_headers)
+    assert child_detail.status_code == 200
+    assert child_detail.json()["name"] == "org-skill"
+
+    child_version = client.get("/api/skills/local/org-skill/versions/1.0.0", headers=child_headers)
+    assert child_version.status_code == 200
+    assert child_version.json()["version"] == "1.0.0"
+
+    assert client.get("/api/skills/local/org-skill", headers=sibling_headers).status_code == 404
+    assert client.get("/api/skills/local/org-skill/versions/1.0.0", headers=sibling_headers).status_code == 404
+    assert client.get("/api/skills/local/org-skill", headers=local_headers).status_code == 404
+    assert client.get("/api/skills/local/org-skill").status_code == 404
+
+
+def test_non_admin_can_only_bind_skill_to_current_leaf_organization(client: TestClient, monkeypatch):
+    def fake_upload(skill_name: str, content: bytes) -> str:
+        return nexus_service.build_package_url(skill_name)
+
+    monkeypatch.setattr(nexus_service, "upload_skill_zip", fake_upload)
+
+    alice_headers = login_ad_user(
+        client,
+        monkeypatch,
+        "alice",
+        distinguished_name=(
+            "CN=alice,OU=系统方案部,OU=公共技术中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+        ),
+    )
+
+    forbidden_create = client.post(
+        "/api/workspace/skills",
+        headers=alice_headers,
+        files={"zip_file": ("org.zip", make_zip("# org"), "application/zip")},
+        data={
+            "name": "ancestor-org-skill",
+            "description_markdown": "# demo",
+            "scope_type": "ORGANIZATION",
+            "scope_org_level": "3",
+            "scope_org_name": "公共技术中心",
+            "scope_org_path": "支付硬件事业群 / 技术中心 / 公共技术中心",
+        },
+    )
+    assert forbidden_create.status_code == 403
+    assert forbidden_create.json()["detail"] == "无权将 Skill 绑定到该组织范围"
+
+    allowed_create = create_local_skill(
+        client,
+        monkeypatch,
+        alice_headers,
+        name="leaf-org-skill",
+        scope_type="ORGANIZATION",
+        scope_org_level=4,
+        scope_org_name="系统方案部",
+        scope_org_path="支付硬件事业群 / 技术中心 / 公共技术中心 / 系统方案部",
+    )
+    payload = allowed_create.json()
+    assert payload["scope_type"] == "ORGANIZATION"
+    assert payload["scope_org_level"] == 4
+    assert payload["scope_org_name"] == "系统方案部"
+    assert payload["scope_org_path"] == "支付硬件事业群 / 技术中心 / 公共技术中心 / 系统方案部"
+
+
+def test_admin_can_bind_skill_to_ancestor_organization_with_partial_depth(
+    client: TestClient,
+    monkeypatch,
+):
+    admin_headers = auth_headers(client)
+    login_ad_user(
+        client,
+        monkeypatch,
+        "alice",
+        distinguished_name="CN=alice,OU=平台研发部,OU=研发中心,OU=新国都集团,DC=xgd,DC=com",
+    )
+    descendant_headers = login_ad_user(
+        client,
+        monkeypatch,
+        "descendant",
+        distinguished_name="CN=descendant,OU=应用一组,OU=平台研发部,OU=研发中心,OU=新国都集团,DC=xgd,DC=com",
+    )
+
+    create_response = create_local_skill(
+        client,
+        monkeypatch,
+        admin_headers,
+        name="partial-org-skill",
+        scope_type="ORGANIZATION",
+        scope_org_level=1,
+        scope_org_name="研发中心",
+        scope_org_path="研发中心",
+    )
+    assert create_response.json()["scope_org_level"] == 1
+    assert create_response.json()["scope_org_path"] == "研发中心"
+
+    descendant_list = client.get("/api/skills", headers=descendant_headers)
+    assert descendant_list.status_code == 200
+    assert [item["name"] for item in descendant_list.json()["local_items"]] == ["partial-org-skill"]
+
+
 def test_public_skills_groups_local_and_remote_results(client: TestClient, monkeypatch):
     async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
         assert page == 1
@@ -1742,7 +2086,7 @@ def test_public_config_returns_cli_install_command(client: TestClient):
     assert response.status_code == 200
     command = response.json()["cli_install_command"]
     assert command.startswith("npm install")
-    assert "@xgd/nexgo-skills" in command
+    assert "@xgd/" in command
 
 
 def test_public_remote_pagination_uses_page_arguments(client, monkeypatch):

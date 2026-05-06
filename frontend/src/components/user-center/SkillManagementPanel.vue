@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { authState, fetchWorkspaceSkills } from '../../services/api'
+import { authState, fetchWorkspaceSkills, getSkillScopeLabel } from '../../services/api'
 
 const router = useRouter()
 const loading = ref(false)
@@ -168,7 +168,7 @@ onBeforeUnmount(() => {
             </router-link>
           </td>
           <td v-if="isAdmin">{{ skill.owner_username || '-' }}</td>
-          <td>{{ skill.group_name ? `组内 · ${skill.group_name}` : '公开' }}</td>
+          <td>{{ getSkillScopeLabel(skill) }}</td>
           <td>
             <span class="version-chip">{{ skill.current_version }}</span>
           </td>

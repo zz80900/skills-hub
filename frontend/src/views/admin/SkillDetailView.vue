@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import CommandSnippet from '../../components/CommandSnippet.vue'
 import SiteHeader from '../../components/SiteHeader.vue'
-import { authState, deleteSkill, fetchWorkspaceSkill } from '../../services/api'
+import { authState, deleteSkill, fetchWorkspaceSkill, getSkillScopeLabel } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -126,8 +126,16 @@ watch(
           </div>
           <div class="detail-meta__item">
             <span>可见范围</span>
-            <code>{{ skill.group_name ? `组内 · ${skill.group_name}` : '公开' }}</code>
-            <small>{{ skill.group_name ? '仅该组成员和管理员可在首页查看' : '所有访客都可在首页查看' }}</small>
+            <code>{{ getSkillScopeLabel(skill) }}</code>
+            <small>
+              {{
+                skill.scope_type === 'GROUP'
+                  ? '仅该组成员和管理员可在首页查看'
+                  : skill.scope_type === 'ORGANIZATION'
+                    ? '仅该组织及其子组织成员和管理员可在首页查看'
+                    : '所有访客都可在首页查看'
+              }}
+            </small>
           </div>
           <div v-if="isAdmin" class="detail-meta__item">
             <span>归属用户</span>

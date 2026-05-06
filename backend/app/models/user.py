@@ -36,6 +36,13 @@ class User(Base):
     )
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     external_principal: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ad_distinguished_name: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    org_level_1: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    org_level_2: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    org_level_3: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    org_level_4: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    org_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    org_depth: Mapped[int | None] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

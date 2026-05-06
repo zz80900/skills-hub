@@ -16,6 +16,8 @@ class PublicSkillSummary(BaseModel):
     version: str | None = None
     contributor: str | None = None
     updated_at: datetime | None = None
+    scope_type: str | None = None
+    scope_label: str | None = None
 
 
 class SkillListResponse(BaseModel):
@@ -65,6 +67,11 @@ class ManagedSkillSummary(BaseModel):
     owner_username: str | None = None
     group_id: int | None = None
     group_name: str | None = None
+    scope_type: str
+    scope_label: str
+    scope_org_level: int | None = None
+    scope_org_name: str | None = None
+    scope_org_path: str | None = None
     current_version: str
     contributor: str | None = None
     description_html: str
@@ -84,3 +91,10 @@ class ManagedSkillDetail(ManagedSkillSummary):
 
 AdminSkillSummary = ManagedSkillSummary
 AdminSkillDetail = ManagedSkillDetail
+
+
+class OrganizationScopeOption(BaseModel):
+    level: int
+    name: str
+    path: str
+    is_leaf: bool = True

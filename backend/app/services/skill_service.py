@@ -9,7 +9,13 @@ from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.group import Group, GroupMembership
-from app.models.skill import Skill, SkillVersion
+from app.models.skill import (
+    SKILL_SCOPE_GROUP,
+    SKILL_SCOPE_ORGANIZATION,
+    SKILL_SCOPE_PUBLIC,
+    Skill,
+    SkillVersion,
+)
 from app.models.user import User
 from app.services.group_service import resolve_group_for_skill_binding
 from app.services.markdown import render_markdown
@@ -33,6 +39,7 @@ ZIP_CMD_CHAIN_DETAIL = "cmd 文件不能包含其他命令或命令拼接"
 ZIP_CMD_PATTERN = re.compile(r"^npm install(?:\s+.+)?$")
 SKILL_NAME_SPACE_DETAIL = "Skill 名称不能包含空格"
 SKILL_NAME_PATTERN_DETAIL = "Skill 名称只允许小写字母、数字和中划线"
+SKILL_SCOPE_OPTIONS = {SKILL_SCOPE_PUBLIC, SKILL_SCOPE_GROUP, SKILL_SCOPE_ORGANIZATION}
 
 
 def normalize_optional_text(value: str | None) -> str | None:
@@ -180,7 +187,7 @@ def _apply_skill_query_filters(statement, query: str | None):
 
 def _apply_public_skill_visibility_filter(statement, actor: User | None):
     if actor is None:
-        return statement.where(Skill.group_id.is_(None))
+        return statement.where(Skill.scope_type == SKILL_SCOPE_PUBLIC)
     if actor.role.name == ROLE_ADMIN:
         return statement
 
@@ -192,7 +199,16 @@ def _apply_public_skill_visibility_filter(statement, actor: User | None):
         )
         .exists()
     )
-    return statement.where(or_(Skill.group_id.is_(None), membership_exists))
+    org_paths = actor_organization_paths(actor)
+    org_conditions = [Skill.scope_type == SKILL_SCOPE_PUBLIC]
+    org_conditions.append((Skill.scope_type == SKILL_SCOPE_GROUP) & membership_exists)
+    if org_paths:
+        for path in org_paths:
+            org_conditions.append(
+                (Skill.scope_type == SKILL_SCOPE_ORGANIZATION)
+                & (Skill.scope_org_path == path)
+            )
+    return statement.where(or_(*org_conditions))
 
 
 def search_public_skills(session: Session, query: str | None = None, actor: User | None = None) -> list[Skill]:
@@ -284,7 +300,12 @@ def create_skill(
     name: str,
     description_markdown: str,
     package_url: str,
+    *,
+    scope_type: str,
     group: Group | None = None,
+    scope_org_level: int | None = None,
+    scope_org_name: str | None = None,
+    scope_org_path: str | None = None,
 ) -> Skill:
     contributor = (owner.display_name or owner.username).strip() or None
     description_html = render_markdown(description_markdown)
@@ -297,6 +318,10 @@ def create_skill(
         package_url=package_url,
         current_version=INITIAL_SKILL_VERSION,
         group_id=group.id if group is not None else None,
+        scope_type=scope_type,
+        scope_org_level=scope_org_level,
+        scope_org_name=scope_org_name,
+        scope_org_path=scope_org_path,
     )
     session.add(skill)
     session.flush()
@@ -320,7 +345,12 @@ def update_skill(
     skill: Skill,
     description_markdown: str,
     package_url: str | None,
+    *,
+    scope_type: str,
     group: Group | None,
+    scope_org_level: int | None,
+    scope_org_name: str | None,
+    scope_org_path: str | None,
 ) -> Skill:
     next_version = get_next_version(skill.current_version)
     next_package_url = package_url or skill.package_url
@@ -331,6 +361,10 @@ def update_skill(
     skill.package_url = next_package_url
     skill.current_version = next_version
     skill.group_id = group.id if group is not None else None
+    skill.scope_type = scope_type
+    skill.scope_org_level = scope_org_level
+    skill.scope_org_name = scope_org_name
+    skill.scope_org_path = scope_org_path
 
     session.add(skill)
     session.flush()
@@ -362,6 +396,11 @@ def to_skill_summary(skill: Skill) -> dict[str, Any]:
         "owner_username": skill.owner.username,
         "group_id": skill.group_id,
         "group_name": skill.group.name if skill.group is not None else None,
+        "scope_type": skill.scope_type,
+        "scope_label": build_scope_label(skill),
+        "scope_org_level": skill.scope_org_level,
+        "scope_org_name": skill.scope_org_name,
+        "scope_org_path": skill.scope_org_path,
         "current_version": skill.current_version,
         "contributor": skill.contributor,
         "description_html": skill.description_html,
@@ -400,6 +439,8 @@ def to_public_skill_summary(skill: Skill) -> dict[str, Any]:
         "installs": None,
         "version": skill.current_version,
         "contributor": skill.contributor,
+        "scope_type": skill.scope_type,
+        "scope_label": build_scope_label(skill),
     }
 
 
@@ -432,6 +473,8 @@ def to_public_skill_version_detail(
         "installs": None,
         "version": version.version,
         "contributor": version.contributor,
+        "scope_type": skill.scope_type,
+        "scope_label": build_scope_label(skill),
         "history_versions": _history_versions(versions),
         "detail_url": None,
         "source_repository": None,
@@ -444,3 +487,135 @@ def default_package_url(skill_name: str) -> str:
 
 def resolve_skill_group(session: Session, actor: User, group_id: int | None) -> Group | None:
     return resolve_group_for_skill_binding(session, actor, group_id)
+
+
+def normalize_scope_type(scope_type: str | None) -> str:
+    normalized = (scope_type or SKILL_SCOPE_PUBLIC).strip().upper()
+    if normalized not in SKILL_SCOPE_OPTIONS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="scope_type 非法")
+    return normalized
+
+
+def normalize_org_scope_payload(scope_org_level: int | None, scope_org_name: str | None, scope_org_path: str | None) -> tuple[int | None, str | None, str | None]:
+    normalized_name = normalize_optional_text(scope_org_name)
+    normalized_path = normalize_optional_text(scope_org_path)
+    if scope_org_level is None and normalized_name is None and normalized_path is None:
+        return None, None, None
+    if scope_org_level is None or scope_org_level < 1 or scope_org_level > 4:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="scope_org_level 必须在 1 到 4 之间")
+    if not normalized_name or not normalized_path:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="组织范围参数不完整")
+    return int(scope_org_level), normalized_name, normalized_path
+
+
+def normalize_optional_text(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized or None
+
+
+def actor_organization_levels(actor: User) -> list[str]:
+    return [
+        level
+        for level in (actor.org_level_1, actor.org_level_2, actor.org_level_3, actor.org_level_4)
+        if (level or "").strip()
+    ]
+
+
+def actor_organization_paths(actor: User) -> list[str]:
+    levels = actor_organization_levels(actor)
+    paths: list[str] = []
+    for index in range(1, len(levels) + 1):
+        paths.append(" / ".join(levels[:index]))
+    return paths
+
+
+def build_scope_label(skill: Skill) -> str:
+    if skill.scope_type == SKILL_SCOPE_GROUP:
+        return f"组内 · {skill.group.name if skill.group is not None else (skill.group_id or '-')}"
+    if skill.scope_type == SKILL_SCOPE_ORGANIZATION:
+        return f"部门内 · {skill.scope_org_path or skill.scope_org_name or '-'}"
+    return "公开"
+
+
+def list_organization_scope_options(session: Session, actor: User) -> list[dict[str, Any]]:
+    if actor.role.name == ROLE_ADMIN:
+        rows = (
+            session.query(
+                User.org_level_1,
+                User.org_level_2,
+                User.org_level_3,
+                User.org_level_4,
+            )
+            .filter(User.source == "AD")
+            .all()
+        )
+        options: dict[tuple[int, str], dict[str, Any]] = {}
+        for row in rows:
+            levels = [item for item in row if (item or "").strip()]
+            for index in range(1, len(levels) + 1):
+                path = " / ".join(levels[:index])
+                key = (index, path)
+                if key in options:
+                    continue
+                options[key] = {
+                    "level": index,
+                    "name": levels[index - 1],
+                    "path": path,
+                    "is_leaf": index == len(levels),
+                }
+        return [options[key] for key in sorted(options, key=lambda item: (item[0], item[1]))]
+
+    levels = actor_organization_levels(actor)
+    if not levels:
+        return []
+    return [
+        {
+            "level": len(levels),
+            "name": levels[-1],
+            "path": " / ".join(levels),
+            "is_leaf": True,
+        }
+    ]
+
+
+def resolve_skill_scope(
+    session: Session,
+    actor: User,
+    *,
+    scope_type: str | None,
+    group_id: int | None,
+    scope_org_level: int | None,
+    scope_org_name: str | None,
+    scope_org_path: str | None,
+) -> tuple[str, Group | None, int | None, str | None, str | None]:
+    normalized_scope_type = normalize_scope_type(scope_type)
+    if normalized_scope_type == SKILL_SCOPE_PUBLIC:
+        return normalized_scope_type, None, None, None, None
+    if normalized_scope_type == SKILL_SCOPE_GROUP:
+        group = resolve_group_for_skill_binding(session, actor, group_id)
+        if group is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="组范围必须选择归属组")
+        return normalized_scope_type, group, None, None, None
+
+    normalized_level, normalized_name, normalized_path = normalize_org_scope_payload(
+        scope_org_level,
+        scope_org_name,
+        scope_org_path,
+    )
+    assert normalized_level is not None
+    assert normalized_name is not None
+    assert normalized_path is not None
+
+    valid_options = list_organization_scope_options(session, actor)
+    matched = next(
+        (
+            option for option in valid_options
+            if option["level"] == normalized_level and option["name"] == normalized_name and option["path"] == normalized_path
+        ),
+        None,
+    )
+    if matched is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权将 Skill 绑定到该组织范围")
+    if actor.role.name != ROLE_ADMIN and not matched["is_leaf"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="普通用户只能绑定当前末级组织")
+    return normalized_scope_type, None, normalized_level, normalized_name, normalized_path
