@@ -24,6 +24,8 @@ frontend/.npm-cache-public/
 frontend/.vite/
 *.sqlite3
 backend/tests/test.db
+backend/tests/test-*.db
+backend/tests/*.db-journal
 .DS_Store
 .idea/
 *.log
