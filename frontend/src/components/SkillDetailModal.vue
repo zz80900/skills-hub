@@ -87,13 +87,15 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="detail-modal__meta">
-              <div v-if="source === 'local'" class="detail-meta__item">
-                <span>版本号</span>
-                <code>{{ skill.version || '未设置' }}</code>
-              </div>
-              <div v-if="skill.contributor" class="detail-meta__item">
-                <span>上传者</span>
-                <code>{{ skill.contributor }}</code>
+              <div v-if="source === 'local' || skill.contributor" class="detail-meta__compact-row">
+                <div v-if="source === 'local'" class="detail-meta__item">
+                  <span>版本号</span>
+                  <code>{{ skill.version || '未设置' }}</code>
+                </div>
+                <div v-if="skill.contributor" class="detail-meta__item">
+                  <span>上传者</span>
+                  <code>{{ skill.contributor }}</code>
+                </div>
               </div>
               <CommandSnippet label="Skill 安装" :command="skill.install_command" compact />
               <div v-if="skill.source_repository || skill.detail_url" class="detail-meta__item">

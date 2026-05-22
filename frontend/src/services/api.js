@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { buildEncryptedPassword } from './security'
+import { createNetworkAccessError } from './errors'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const TOKEN_KEY = 'nexgo-skills-session-token'
@@ -181,13 +182,10 @@ function getRequestHeaders(options, includeAuth) {
   return headers
 }
 
-function shouldResetHomeLocation() {
+function shouldRedirectHomeAfterAuthFailure() {
   const location = window.location
-  if (location.pathname.startsWith('/skills/')) {
-    return true
-  }
   if (location.pathname !== '/') {
-    return false
+    return true
   }
   const params = new URLSearchParams(location.search)
   return ['skill', 'source', 'version'].some((key) => params.has(key))
@@ -197,14 +195,12 @@ function redirectToHome() {
   window.location.replace('/')
 }
 
-function redirectToLogin() {
-  const location = window.location
-  const currentPath = `${location.pathname}${location.search}${location.hash}`
-  const loginUrl = new URL('/login', location.origin)
-  if (currentPath && currentPath !== '/login') {
-    loginUrl.searchParams.set('redirect', currentPath)
+function redirectHomeForExpiredSession() {
+  if (window.location.pathname === '/' && !window.location.search && !window.location.hash) {
+    window.location.reload()
+    return
   }
-  window.location.replace(`${loginUrl.pathname}${loginUrl.search}`)
+  redirectToHome()
 }
 
 function waitForNavigation() {
@@ -221,10 +217,15 @@ async function request(path, options = {}) {
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(path, {
-    ...fetchOptions,
-    headers,
-  })
+  let response
+  try {
+    response = await fetch(path, {
+      ...fetchOptions,
+      headers,
+    })
+  } catch (err) {
+    throw createNetworkAccessError(err)
+  }
 
   if (response.status === 204) {
     return null
@@ -235,8 +236,8 @@ async function request(path, options = {}) {
     if (response.status === 401) {
       clearSession()
       if (authMode === AUTH_MODE_OPTIONAL && includeAuth) {
-        if (shouldResetHomeLocation()) {
-          redirectToHome()
+        if (shouldRedirectHomeAfterAuthFailure()) {
+          redirectHomeForExpiredSession()
           return waitForNavigation()
         }
         return request(path, {
@@ -244,11 +245,8 @@ async function request(path, options = {}) {
           authMode,
         })
       }
-      if (
-        authMode === AUTH_MODE_REQUIRED
-        && (window.location.pathname.startsWith('/workspace') || window.location.pathname.startsWith('/admin'))
-      ) {
-        redirectToLogin()
+      if (authMode === AUTH_MODE_REQUIRED) {
+        redirectHomeForExpiredSession()
         return waitForNavigation()
       }
     }

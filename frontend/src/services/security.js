@@ -1,3 +1,5 @@
+import { createNetworkAccessError } from './errors'
+
 const CHALLENGE_ENDPOINT = '/api/auth/challenge'
 
 function generateNonce() {
@@ -79,6 +81,12 @@ async function fetchChallenge() {
         }, data.expires_in_seconds * 1000)
 
         return challengeCache
+      })
+      .catch((err) => {
+        if (err instanceof TypeError) {
+          throw createNetworkAccessError(err)
+        }
+        throw err
       })
       .finally(() => {
         challengeRequest = null
