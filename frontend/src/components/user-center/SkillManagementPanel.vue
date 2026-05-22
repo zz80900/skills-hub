@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import ListState from '../ListState.vue'
 import { authState, fetchWorkspaceSkills, getSkillScopeLabel } from '../../services/api'
 
 const router = useRouter()
@@ -10,6 +11,7 @@ const error = ref('')
 const search = ref('')
 const skills = ref([])
 let searchTimer = null
+let skillQueryId = 0
 
 const isAdmin = computed(() => authState.user?.role === 'ADMIN')
 const pageEyebrow = computed(() => (isAdmin.value ? 'Skill 管理' : '我的 Skill'))
@@ -38,6 +40,8 @@ const emptyStateText = computed(() => {
   }
   return isAdmin.value ? '当前还没有 Skill 记录。' : '你还没有上传 Skill。'
 })
+const blockingError = computed(() => (!skills.value.length ? error.value : ''))
+const refreshError = computed(() => (skills.value.length ? error.value : ''))
 
 function formatDate(value) {
   if (!value) {
@@ -53,17 +57,28 @@ function formatDate(value) {
 }
 
 async function loadSkills(keyword = '') {
+  const queryId = skillQueryId + 1
+  skillQueryId = queryId
   loading.value = true
   error.value = ''
   try {
-    skills.value = await fetchWorkspaceSkills(keyword)
+    const payload = await fetchWorkspaceSkills(keyword)
+    if (queryId !== skillQueryId) {
+      return
+    }
+    skills.value = payload
   } catch (err) {
+    if (queryId !== skillQueryId) {
+      return
+    }
     error.value = err.message
     if (!authState.token) {
       router.push('/login')
     }
   } finally {
-    loading.value = false
+    if (queryId === skillQueryId) {
+      loading.value = false
+    }
   }
 }
 
@@ -72,6 +87,10 @@ function clearSearch() {
     return
   }
   search.value = ''
+}
+
+function retryLoadSkills() {
+  loadSkills(search.value.trim())
 }
 
 watch(search, (value) => {
@@ -143,44 +162,54 @@ onBeforeUnmount(() => {
     </label>
   </section>
 
-  <section v-if="error" class="feedback feedback--error">{{ error }}</section>
-  <section v-else-if="loading" class="feedback">正在加载 Skill 列表...</section>
-  <section v-else-if="!skills.length" class="feedback">{{ emptyStateText }}</section>
+  <ListState
+    :error="blockingError"
+    :loading="loading && !skills.length"
+    :empty="!skills.length"
+    loading-text="正在加载 Skill 列表..."
+    :empty-text="emptyStateText"
+    @retry="retryLoadSkills"
+  >
+    <section v-if="refreshError" class="feedback feedback--error list-state">
+      <span>{{ refreshError }}</span>
+      <button class="button button--ghost" type="button" @click="retryLoadSkills">重试</button>
+    </section>
 
-  <section v-else class="admin-table-wrap">
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th scope="col">标题</th>
-          <th v-if="isAdmin" scope="col">归属用户</th>
-          <th scope="col">可见范围</th>
-          <th scope="col">当前版本</th>
-          <th scope="col">上传者</th>
-          <th v-if="isAdmin" scope="col">状态</th>
-          <th scope="col">更新时间</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="skill in skills" :key="skill.id" :class="{ 'admin-table__row--deleted': skill.is_deleted }">
-          <td>
-            <router-link class="admin-table__title" :to="`/workspace/skills/${skill.name}`">
-              {{ skill.name }}
-            </router-link>
-          </td>
-          <td v-if="isAdmin">{{ skill.owner_username || '-' }}</td>
-          <td>{{ getSkillScopeLabel(skill) }}</td>
-          <td>
-            <span class="version-chip">{{ skill.current_version }}</span>
-          </td>
-          <td>{{ skill.contributor || '-' }}</td>
-          <td v-if="isAdmin">
-            <span class="status-chip" :class="{ 'status-chip--deleted': skill.is_deleted }">
-              {{ skill.is_deleted ? '已删除' : '正常' }}
-            </span>
-          </td>
-          <td>{{ formatDate(skill.updated_at) }}</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
+    <section class="admin-table-wrap" :class="{ 'is-refreshing': loading }">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th scope="col">标题</th>
+            <th v-if="isAdmin" scope="col">归属用户</th>
+            <th scope="col">可见范围</th>
+            <th scope="col">当前版本</th>
+            <th scope="col">上传者</th>
+            <th v-if="isAdmin" scope="col">状态</th>
+            <th scope="col">更新时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="skill in skills" :key="skill.id" :class="{ 'admin-table__row--deleted': skill.is_deleted }">
+            <td>
+              <router-link class="admin-table__title" :to="`/workspace/skills/${skill.name}`">
+                {{ skill.name }}
+              </router-link>
+            </td>
+            <td v-if="isAdmin">{{ skill.owner_username || '-' }}</td>
+            <td>{{ getSkillScopeLabel(skill) }}</td>
+            <td>
+              <span class="version-chip">{{ skill.current_version }}</span>
+            </td>
+            <td>{{ skill.contributor || '-' }}</td>
+            <td v-if="isAdmin">
+              <span class="status-chip" :class="{ 'status-chip--deleted': skill.is_deleted }">
+                {{ skill.is_deleted ? '已删除' : '正常' }}
+              </span>
+            </td>
+            <td>{{ formatDate(skill.updated_at) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </ListState>
 </template>

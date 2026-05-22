@@ -1,4 +1,5 @@
 import { createNetworkAccessError } from './errors'
+import { reportNetworkFailure, reportNetworkSuccess } from './networkFeedback'
 
 const CHALLENGE_ENDPOINT = '/api/auth/challenge'
 
@@ -57,6 +58,7 @@ async function fetchChallenge() {
   if (!challengeRequest) {
     challengeRequest = fetch(CHALLENGE_ENDPOINT)
       .then(async (res) => {
+        reportNetworkSuccess()
         if (!res.ok) {
           throw new Error('获取挑战参数失败')
         }
@@ -84,7 +86,9 @@ async function fetchChallenge() {
       })
       .catch((err) => {
         if (err instanceof TypeError) {
-          throw createNetworkAccessError(err)
+          const networkError = createNetworkAccessError(err)
+          reportNetworkFailure(networkError.message)
+          throw networkError
         }
         throw err
       })

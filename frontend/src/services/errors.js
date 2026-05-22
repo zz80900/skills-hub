@@ -2,6 +2,7 @@ export const NETWORK_ACCESS_ERROR_MESSAGE = '网络访问失败，请关闭代�
 
 export function createNetworkAccessError(cause) {
   const error = new Error(NETWORK_ACCESS_ERROR_MESSAGE)
+  error.name = 'NetworkAccessError'
   error.cause = cause
   return error
 }

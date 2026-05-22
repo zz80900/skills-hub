@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import SiteHeader from '../../components/SiteHeader.vue'
 import SkillCard from '../../components/SkillCard.vue'
 import SkillDetailModal from '../../components/SkillDetailModal.vue'
+import ListState from '../../components/ListState.vue'
 import { fetchSkill, fetchSkills } from '../../services/api'
 
 const route = useRoute()
@@ -26,6 +27,7 @@ const remoteSentinel = ref(null)
 const showBackToTop = ref(false)
 let searchTimer = null
 let detailRequestId = 0
+let skillRequestId = 0
 let remoteObserver = null
 
 const libraryTabs = [
@@ -80,10 +82,12 @@ function mergeRemoteSkills(items) {
 async function loadSkills(keyword = '', options = {}) {
   const nextPage = options.page || 1
   const appendRemote = Boolean(options.appendRemote)
+  const requestId = appendRemote ? skillRequestId : skillRequestId + 1
 
   if (appendRemote) {
     remoteLoadingMore.value = true
   } else {
+    skillRequestId = requestId
     loading.value = true
     error.value = ''
     remoteError.value = ''
@@ -91,6 +95,9 @@ async function loadSkills(keyword = '', options = {}) {
 
   try {
     const payload = await fetchSkills(keyword, { page: nextPage, pageSize: remotePageSize.value })
+    if (!appendRemote && requestId !== skillRequestId) {
+      return
+    }
     localSkills.value = payload.local_items || []
     remoteError.value = payload.remote_error || ''
     remotePage.value = payload.remote_page || nextPage
@@ -103,6 +110,9 @@ async function loadSkills(keyword = '', options = {}) {
       remoteSkills.value = payload.remote_items || []
     }
   } catch (err) {
+    if (!appendRemote && requestId !== skillRequestId) {
+      return
+    }
     if (appendRemote) {
       remoteError.value = err.message
     } else {
@@ -111,7 +121,7 @@ async function loadSkills(keyword = '', options = {}) {
   } finally {
     if (appendRemote) {
       remoteLoadingMore.value = false
-    } else {
+    } else if (requestId === skillRequestId) {
       loading.value = false
     }
   }
@@ -160,6 +170,10 @@ function clearSearch() {
     return
   }
   search.value = ''
+}
+
+function retryLoadSkills() {
+  loadSkills(search.value, { page: 1 })
 }
 
 function openSkillDetail(skill) {
@@ -311,28 +325,30 @@ onBeforeUnmount(() => {
         </label>
       </section>
 
-      <section v-if="error" class="feedback feedback--error">{{ error }}</section>
-      <section v-else-if="loading" class="feedback">正在加载 Skills...</section>
-      <template v-else>
+      <ListState
+        :error="error"
+        :loading="loading && !localSkills.length && !remoteSkills.length"
+        loading-text="正在加载 Skills..."
+        @retry="retryLoadSkills"
+      >
         <section v-if="activeLibraryTab === 'local'" class="skill-section">
           <div class="skill-section__header">
             <div>
               <p class="eyebrow">本地库</p>
               <h2>内部 Skills</h2>
             </div>
-            <p class="skill-section__summary">{{ localTabSummary }}</p>
+            <p class="skill-section__summary">{{ loading ? '正在检索...' : localTabSummary }}</p>
           </div>
-          <section v-if="!localSkills.length" class="feedback">
-            {{ search ? `本地库没有找到与“${search}”匹配的 Skill。` : '本地库当前还没有 Skill。' }}
-          </section>
-          <section v-else class="skills-grid">
-            <SkillCard
-              v-for="skill in localSkills"
-              :key="`${skill.source}:${skill.slug}`"
-              :skill="skill"
-              @select="openSkillDetail"
-            />
-          </section>
+          <ListState :empty="!localSkills.length" :empty-text="search ? `本地库没有找到与“${search}”匹配的 Skill。` : '本地库当前还没有 Skill。'">
+            <section class="skills-grid" :class="{ 'is-refreshing': loading }">
+              <SkillCard
+                v-for="skill in localSkills"
+                :key="`${skill.source}:${skill.slug}`"
+                :skill="skill"
+                @select="openSkillDetail"
+              />
+            </section>
+          </ListState>
         </section>
 
         <section v-else class="skill-section">
@@ -341,20 +357,23 @@ onBeforeUnmount(() => {
               <p class="eyebrow">skills.sh</p>
               <h2>远程 Skills</h2>
             </div>
-            <p class="skill-section__summary">{{ remoteTabSummary }}</p>
+            <p class="skill-section__summary">{{ loading ? '正在检索...' : remoteTabSummary }}</p>
           </div>
-          <section v-if="remoteError" class="feedback feedback--error">{{ remoteError }}</section>
-          <section v-else-if="!remoteSkills.length" class="feedback">
-            {{ search ? `skills.sh 没有找到与“${search}”匹配的 Skill。` : '当前未获取到 skills.sh Skill。' }}
-          </section>
-          <section v-else class="skills-grid skills-grid--masonry">
-            <SkillCard
-              v-for="skill in remoteSkills"
-              :key="`${skill.source}:${skill.slug}`"
-              :skill="skill"
-              @select="openSkillDetail"
-            />
-          </section>
+          <ListState
+            :error="remoteError"
+            :empty="!remoteSkills.length"
+            :empty-text="search ? `skills.sh 没有找到与“${search}”匹配的 Skill。` : '当前未获取到 skills.sh Skill。'"
+            @retry="retryLoadSkills"
+          >
+            <section class="skills-grid skills-grid--masonry" :class="{ 'is-refreshing': loading }">
+              <SkillCard
+                v-for="skill in remoteSkills"
+                :key="`${skill.source}:${skill.slug}`"
+                :skill="skill"
+                @select="openSkillDetail"
+              />
+            </section>
+          </ListState>
           <div
             v-if="remoteSkills.length && (remoteHasMore || remoteLoadingMore)"
             ref="remoteSentinel"
@@ -363,7 +382,7 @@ onBeforeUnmount(() => {
             {{ remoteLoadingMore ? '正在继续加载 skills.sh Skills...' : '向下滚动继续加载' }}
           </div>
         </section>
-      </template>
+      </ListState>
     </main>
     <SkillDetailModal
       :open="isSkillModalOpen"

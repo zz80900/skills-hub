@@ -14,6 +14,7 @@ const loading = ref(false)
 const submitting = ref(false)
 const error = ref('')
 const selectedFileName = ref('')
+const fileError = ref('')
 const currentVersion = ref('')
 const showZipGuidance = ref(false)
 const groupOptionsLoading = ref(false)
@@ -45,8 +46,13 @@ const selectedOrganization = computed(() =>
 
 function onFileChange(event) {
   const [file] = event.target.files || []
+  fileError.value = ''
   form.zip_file = file || null
   selectedFileName.value = file?.name || ''
+  if (file && !file.name.toLowerCase().endsWith('.zip')) {
+    fileError.value = '请上传 ZIP 压缩包'
+    form.zip_file = null
+  }
 }
 
 function toggleZipGuidance() {
@@ -180,6 +186,7 @@ async function loadSkill() {
 async function handleSubmit() {
   submitting.value = true
   error.value = ''
+  fileError.value = ''
   try {
     const payload = new FormData()
     validateScope()
@@ -200,6 +207,7 @@ async function handleSubmit() {
     } else {
       payload.append('name', validatedName)
       if (!form.zip_file) {
+        fileError.value = '请上传 ZIP 压缩包'
         throw new Error('请上传 ZIP 压缩包')
       }
       payload.append('zip_file', form.zip_file)
@@ -383,8 +391,16 @@ watch(
               </ul>
             </section>
 
-            <input id="skill-zip-file" class="file-input" type="file" accept=".zip" @change="onFileChange" />
-            <small v-if="selectedFileName">{{ selectedFileName }}</small>
+            <label class="upload-dropzone" for="skill-zip-file">
+              <input id="skill-zip-file" class="upload-dropzone__input" type="file" accept=".zip" @change="onFileChange" />
+              <span class="upload-dropzone__title">
+                {{ selectedFileName || (isEditMode ? '选择升级 ZIP 包' : '选择 Skill ZIP 包') }}
+              </span>
+              <span class="upload-dropzone__hint">
+                {{ selectedFileName ? '已选择文件，提交后会上传处理。' : '点击选择 .zip 文件。' }}
+              </span>
+            </label>
+            <small v-if="fileError" class="feedback feedback--error feedback--inline">{{ fileError }}</small>
             <small v-else-if="isEditMode">不上传 ZIP 时，将沿用上一版本的安装包。</small>
           </div>
 

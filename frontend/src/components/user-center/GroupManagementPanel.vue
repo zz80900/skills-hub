@@ -2,6 +2,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import ConfirmDialog from '../ConfirmDialog.vue'
+import ListState from '../ListState.vue'
 import InfoModal from '../InfoModal.vue'
 import {
   authState,
@@ -14,6 +16,7 @@ import {
   removeGroupMember,
   updateGroup,
 } from '../../services/api'
+import { notifySuccess } from '../../services/feedback'
 
 const router = useRouter()
 const loading = ref(false)
@@ -25,11 +28,13 @@ const loadError = ref('')
 const groupError = ref('')
 const memberError = ref('')
 const addMemberError = ref('')
+const pendingActionError = ref('')
 const groups = ref([])
 const memberOptions = ref([])
 const selectedGroupId = ref(null)
 const addMemberSearch = ref('')
 const isAddMemberModalOpen = ref(false)
+const pendingAction = ref(null)
 
 const form = reactive({
   name: '',
@@ -61,6 +66,8 @@ const pageSummary = computed(() => {
   }
   return canManageAnyGroup.value ? `当前共 ${groups.value.length} 个可见用户组` : `当前共加入 ${groups.value.length} 个用户组`
 })
+const blockingLoadError = computed(() => (!groups.value.length ? loadError.value : ''))
+const refreshLoadError = computed(() => (groups.value.length ? loadError.value : ''))
 const groupSubmitLabel = computed(() => {
   if (savingGroup.value) {
     return '提交中...'
@@ -149,6 +156,18 @@ function closeAddMemberModal() {
   addMemberError.value = ''
 }
 
+function clearPendingAction() {
+  pendingAction.value = null
+  pendingActionError.value = ''
+}
+
+function closePendingAction() {
+  if (deletingGroup.value || removingMemberId.value) {
+    return
+  }
+  clearPendingAction()
+}
+
 function openAddMemberModal() {
   if (!selectedGroup.value) {
     return
@@ -203,6 +222,10 @@ async function loadPage() {
   }
 }
 
+function retryLoadPage() {
+  loadPage()
+}
+
 async function handleGroupSubmit() {
   if (!isAdmin.value) {
     return
@@ -240,24 +263,8 @@ async function handleDeleteGroup() {
   if (!isAdmin.value || !selectedGroup.value || deletingGroup.value) {
     return
   }
-
-  const confirmed = window.confirm(`确认删除用户组「${selectedGroup.value.name}」吗？该操作不可恢复。`)
-  if (!confirmed) {
-    return
-  }
-
-  deletingGroup.value = true
-  groupError.value = ''
-  memberError.value = ''
-  try {
-    await deleteGroup(selectedGroup.value.id)
-    await loadGroups()
-    await loadMemberOptions()
-  } catch (err) {
-    groupError.value = err.message
-  } finally {
-    deletingGroup.value = false
-  }
+  pendingAction.value = { type: 'delete-group', group: selectedGroup.value }
+  pendingActionError.value = ''
 }
 
 async function handleAddMember(user) {
@@ -289,21 +296,48 @@ async function handleRemoveMember(member) {
     return
   }
 
-  const confirmed = window.confirm(`确认将成员「${formatUserLabel(member)}」移出组「${selectedGroup.value.name}」吗？`)
-  if (!confirmed) {
+  pendingAction.value = { type: 'remove-member', group: selectedGroup.value, member }
+  pendingActionError.value = ''
+}
+
+async function confirmPendingAction() {
+  const action = pendingAction.value
+  if (!action) {
     return
   }
 
-  removingMemberId.value = member.id
-  memberError.value = ''
-  try {
-    const response = await removeGroupMember(selectedGroup.value.id, member.id)
-    replaceGroupLocally(response)
-    await loadMemberOptions()
-  } catch (err) {
-    memberError.value = err.message
-  } finally {
-    removingMemberId.value = null
+  if (action.type === 'delete-group') {
+    deletingGroup.value = true
+    groupError.value = ''
+    memberError.value = ''
+    try {
+      await deleteGroup(action.group.id)
+      notifySuccess('用户组已删除')
+      clearPendingAction()
+      await loadGroups()
+      await loadMemberOptions()
+    } catch (err) {
+      pendingActionError.value = err.message
+    } finally {
+      deletingGroup.value = false
+    }
+    return
+  }
+
+  if (action.type === 'remove-member') {
+    removingMemberId.value = action.member.id
+    memberError.value = ''
+    try {
+      const response = await removeGroupMember(action.group.id, action.member.id)
+      replaceGroupLocally(response)
+      notifySuccess('成员已移出用户组')
+      clearPendingAction()
+      await loadMemberOptions()
+    } catch (err) {
+      pendingActionError.value = err.message
+    } finally {
+      removingMemberId.value = null
+    }
   }
 }
 
@@ -336,138 +370,147 @@ onMounted(() => {
     </div>
   </section>
 
-  <section v-if="loadError" class="feedback feedback--error">{{ loadError }}</section>
-  <section v-else-if="loading" class="feedback">正在加载用户组...</section>
-  <section v-else class="group-layout">
-    <section class="admin-panel group-panel">
-      <div class="admin-panel__heading">
-        <p class="eyebrow">组列表</p>
-        <h2>{{ isAdmin ? '全部用户组' : canManageAnyGroup ? '我负责和参与的用户组' : '我参与的用户组' }}</h2>
-        <p>{{ isAdmin ? '管理员可维护组定义并指定组长。' : canManageAnyGroup ? '组长可维护自己负责的组，普通组员可查看自己所在的组。' : '你可以查看自己所在的组和组内成员。' }}</p>
-      </div>
-
-      <section v-if="!groups.length" class="feedback">
-        {{ isAdmin ? '当前还没有用户组，请先创建。' : '当前还没有加入任何用户组。' }}
-      </section>
-      <div v-else class="group-list">
-        <button
-          v-for="group in groups"
-          :key="group.id"
-          class="group-list__item"
-          :class="{ 'is-active': selectedGroupId === group.id }"
-          type="button"
-          @click="selectedGroupId = group.id"
-        >
-          <div class="group-list__title-row">
-            <strong>{{ group.name }}</strong>
-            <span class="status-chip">{{ group.member_count }} 人</span>
-          </div>
-          <p>{{ group.description || '未填写组说明' }}</p>
-          <small>组长：{{ group.leader_display_name || group.leader_username }}</small>
-        </button>
-      </div>
+  <ListState
+    :error="blockingLoadError"
+    :loading="loading && !groups.length"
+    :empty="!groups.length"
+    loading-text="正在加载用户组..."
+    :empty-text="isAdmin ? '当前还没有用户组，请先创建。' : '当前还没有加入任何用户组。'"
+    @retry="retryLoadPage"
+  >
+    <section v-if="refreshLoadError" class="feedback feedback--error list-state">
+      <span>{{ refreshLoadError }}</span>
+      <button class="button button--ghost" type="button" @click="retryLoadPage">重试</button>
     </section>
 
-    <section class="group-layout__main">
-      <section v-if="isAdmin" class="admin-panel group-panel">
+    <section class="group-layout" :class="{ 'is-refreshing': loading }">
+      <section class="admin-panel group-panel">
         <div class="admin-panel__heading">
-          <p class="eyebrow">组定义</p>
-          <h2>{{ selectedGroup ? '编辑用户组' : '创建用户组' }}</h2>
-          <p>管理员负责组名、组说明和组长任命；成员维护在下方单独处理。</p>
+          <p class="eyebrow">组列表</p>
+          <h2>{{ isAdmin ? '全部用户组' : canManageAnyGroup ? '我负责和参与的用户组' : '我参与的用户组' }}</h2>
+          <p>{{ isAdmin ? '管理员可维护组定义并指定组长。' : canManageAnyGroup ? '组长可维护自己负责的组，普通组员可查看自己所在的组。' : '你可以查看自己所在的组和组内成员。' }}</p>
         </div>
 
-        <form class="form-card" @submit.prevent="handleGroupSubmit">
-          <label class="field">
-            <span>组名</span>
-            <input v-model="form.name" class="text-input" type="text" placeholder="例如：PLM 组" />
-          </label>
-
-          <label class="field">
-            <span>组说明</span>
-            <textarea
-              v-model="form.description"
-              class="text-area"
-              rows="4"
-              placeholder="描述该组的业务范围或共享规范"
-            />
-          </label>
-
-          <label class="field">
-            <span>组长</span>
-            <select v-model="form.leader_user_id" class="text-input">
-              <option value="">请选择组长</option>
-              <option v-for="user in memberOptions" :key="user.id" :value="String(user.id)">
-                {{ formatUserLabel(user) }}
-              </option>
-            </select>
-          </label>
-
-          <p v-if="groupError" class="feedback feedback--error feedback--inline">{{ groupError }}</p>
-          <div class="form-actions">
-            <button class="button" :disabled="savingGroup" type="submit">{{ groupSubmitLabel }}</button>
-            <button
-              v-if="selectedGroup"
-              class="button button--ghost"
-              type="button"
-              @click="startCreateGroup"
-            >
-              切换为新建
-            </button>
-            <button
-              v-if="selectedGroup"
-              class="button button--danger"
-              :disabled="deletingGroup"
-              type="button"
-              @click="handleDeleteGroup"
-            >
-              {{ deletingGroup ? '删除中...' : '删除组' }}
-            </button>
-          </div>
-        </form>
+        <div class="group-list">
+          <button
+            v-for="group in groups"
+            :key="group.id"
+            class="group-list__item"
+            :class="{ 'is-active': selectedGroupId === group.id }"
+            type="button"
+            @click="selectedGroupId = group.id"
+          >
+            <div class="group-list__title-row">
+              <strong>{{ group.name }}</strong>
+              <span class="status-chip">{{ group.member_count }} 人</span>
+            </div>
+            <p>{{ group.description || '未填写组说明' }}</p>
+            <small>组长：{{ group.leader_display_name || group.leader_username }}</small>
+          </button>
+        </div>
       </section>
 
-      <section v-if="selectedGroup" class="admin-panel group-panel">
-        <div class="admin-panel__heading">
-          <p class="eyebrow">{{ canManageSelectedGroup ? '成员维护' : '组成员' }}</p>
-          <h2>{{ selectedGroup.name }}</h2>
-          <p>
-            当前组长：{{ selectedGroupLead }}，当前共有 {{ currentMembers.length }} 位组员。
-            <template v-if="!canManageSelectedGroup">你当前只有查看权限。</template>
-          </p>
-        </div>
+      <section class="group-layout__main">
+        <section v-if="isAdmin" class="admin-panel group-panel">
+          <div class="admin-panel__heading">
+            <p class="eyebrow">组定义</p>
+            <h2>{{ selectedGroup ? '编辑用户组' : '创建用户组' }}</h2>
+            <p>管理员负责组名、组说明和组长任命；成员维护在下方单独处理。</p>
+          </div>
 
-        <div v-if="canManageSelectedGroup" class="group-member-actions">
-          <button class="button" type="button" @click="openAddMemberModal">新增组员</button>
-        </div>
+          <form class="form-card" @submit.prevent="handleGroupSubmit">
+            <label class="field">
+              <span>组名</span>
+              <input v-model="form.name" class="text-input" type="text" placeholder="例如：PLM 组" />
+            </label>
 
-        <section v-if="memberError" class="feedback feedback--error">{{ memberError }}</section>
-        <section v-if="!currentMembers.length" class="feedback">当前还没有组员。</section>
-        <div v-else class="group-member-list">
-          <article v-for="member in currentMembers" :key="member.id" class="group-member-row">
-            <div>
-              <strong>{{ formatUserLabel(member) }}</strong>
-              <p>
-                {{ member.id === selectedGroup.leader_user_id ? '组长' : member.role === 'ADMIN' ? '管理员' : '普通用户' }}
-                · {{ member.is_active ? '启用中' : '已停用' }}
-              </p>
-            </div>
-            <div class="group-member-row__actions">
-              <span v-if="member.id === selectedGroup.leader_user_id" class="status-chip">组长</span>
+            <label class="field">
+              <span>组说明</span>
+              <textarea
+                v-model="form.description"
+                class="text-area"
+                rows="4"
+                placeholder="描述该组的业务范围或共享规范"
+              />
+            </label>
+
+            <label class="field">
+              <span>组长</span>
+              <select v-model="form.leader_user_id" class="text-input">
+                <option value="">请选择组长</option>
+                <option v-for="user in memberOptions" :key="user.id" :value="String(user.id)">
+                  {{ formatUserLabel(user) }}
+                </option>
+              </select>
+            </label>
+
+            <p v-if="groupError" class="feedback feedback--error feedback--inline">{{ groupError }}</p>
+            <div class="form-actions">
+              <button class="button" :disabled="savingGroup" type="submit">{{ groupSubmitLabel }}</button>
               <button
-                v-else-if="canManageSelectedGroup"
+                v-if="selectedGroup"
                 class="button button--ghost"
                 type="button"
-                :disabled="removingMemberId === member.id"
-                @click="handleRemoveMember(member)"
+                @click="startCreateGroup"
               >
-                {{ removingMemberId === member.id ? '移除中...' : '删除' }}
+                切换为新建
+              </button>
+              <button
+                v-if="selectedGroup"
+                class="button button--danger"
+                :disabled="deletingGroup"
+                type="button"
+                @click="handleDeleteGroup"
+              >
+                {{ deletingGroup ? '删除中...' : '删除组' }}
               </button>
             </div>
-          </article>
-        </div>
+          </form>
+        </section>
+
+        <section v-if="selectedGroup" class="admin-panel group-panel">
+          <div class="admin-panel__heading">
+            <p class="eyebrow">{{ canManageSelectedGroup ? '成员维护' : '组成员' }}</p>
+            <h2>{{ selectedGroup.name }}</h2>
+            <p>
+              当前组长：{{ selectedGroupLead }}，当前共有 {{ currentMembers.length }} 位组员。
+              <template v-if="!canManageSelectedGroup">你当前只有查看权限。</template>
+            </p>
+          </div>
+
+          <div v-if="canManageSelectedGroup" class="group-member-actions">
+            <button class="button" type="button" @click="openAddMemberModal">新增组员</button>
+          </div>
+
+          <section v-if="memberError" class="feedback feedback--error">{{ memberError }}</section>
+          <section v-if="!currentMembers.length" class="feedback">当前还没有组员。</section>
+          <div v-else class="group-member-list">
+            <article v-for="member in currentMembers" :key="member.id" class="group-member-row">
+              <div>
+                <strong>{{ formatUserLabel(member) }}</strong>
+                <p>
+                  {{ member.id === selectedGroup.leader_user_id ? '组长' : member.role === 'ADMIN' ? '管理员' : '普通用户' }}
+                  · {{ member.is_active ? '启用中' : '已停用' }}
+                </p>
+              </div>
+              <div class="group-member-row__actions">
+                <span v-if="member.id === selectedGroup.leader_user_id" class="status-chip">组长</span>
+                <button
+                  v-else-if="canManageSelectedGroup"
+                  class="button button--ghost"
+                  type="button"
+                  :disabled="removingMemberId === member.id"
+                  @click="handleRemoveMember(member)"
+                >
+                  {{ removingMemberId === member.id ? '移除中...' : '删除' }}
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
       </section>
     </section>
-  </section>
+  </ListState>
 
   <InfoModal
     :open="isAddMemberModalOpen"
@@ -516,4 +559,28 @@ onMounted(() => {
       </article>
     </div>
   </InfoModal>
+
+  <ConfirmDialog
+    :open="pendingAction?.type === 'delete-group'"
+    title="删除用户组"
+    :summary="pendingAction?.group ? `目标：${pendingAction.group.name}` : ''"
+    confirm-label="确认删除"
+    :busy="deletingGroup"
+    @close="closePendingAction"
+    @confirm="confirmPendingAction"
+  >
+    <p v-if="pendingActionError" class="feedback feedback--error feedback--inline">{{ pendingActionError }}</p>
+  </ConfirmDialog>
+
+  <ConfirmDialog
+    :open="pendingAction?.type === 'remove-member'"
+    title="移除成员"
+    :summary="pendingAction?.member && pendingAction?.group ? `将「${formatUserLabel(pendingAction.member)}」移出「${pendingAction.group.name}」` : ''"
+    confirm-label="确认移除"
+    :busy="removingMemberId === pendingAction?.member?.id"
+    @close="closePendingAction"
+    @confirm="confirmPendingAction"
+  >
+    <p v-if="pendingActionError" class="feedback feedback--error feedback--inline">{{ pendingActionError }}</p>
+  </ConfirmDialog>
 </template>

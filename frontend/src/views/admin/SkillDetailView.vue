@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import CommandSnippet from '../../components/CommandSnippet.vue'
 import SiteHeader from '../../components/SiteHeader.vue'
 import { authState, deleteSkill, fetchWorkspaceSkill, getSkillScopeLabel } from '../../services/api'
@@ -12,6 +13,7 @@ const loading = ref(false)
 const deleting = ref(false)
 const error = ref('')
 const skill = ref(null)
+const deleteDialogOpen = ref(false)
 
 const isAdmin = computed(() => authState.user?.role === 'ADMIN')
 
@@ -51,10 +53,13 @@ async function handleDelete() {
   if (!skill.value || skill.value.is_deleted) {
     return
   }
-  if (!window.confirm(`确认删除 Skill「${skill.value.name}」吗？该操作为逻辑删除。`)) {
+  deleteDialogOpen.value = true
+}
+
+async function confirmDelete() {
+  if (!skill.value || skill.value.is_deleted) {
     return
   }
-
   deleting.value = true
   error.value = ''
   try {
@@ -148,5 +153,14 @@ watch(
         <article class="markdown-body detail-modal__body" v-html="skill.description_html"></article>
       </section>
     </main>
+    <ConfirmDialog
+      :open="deleteDialogOpen"
+      title="删除 Skill"
+      :summary="skill ? `目标：${skill.name}` : ''"
+      confirm-label="确认删除"
+      :busy="deleting"
+      @close="deleteDialogOpen = false"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

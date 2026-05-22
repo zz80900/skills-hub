@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from 'vue'
 
+import { notifyError, notifySuccess } from '../services/feedback'
+
 const props = defineProps({
   label: {
     type: String,
@@ -52,9 +54,11 @@ async function copyCommand() {
       fallbackCopy(props.command)
     }
     copied.value = true
+    notifySuccess('安装命令已复制')
     resetCopiedState()
   } catch (error) {
     copied.value = false
+    notifyError('复制失败，请手动选择命令复制')
   }
 }
 

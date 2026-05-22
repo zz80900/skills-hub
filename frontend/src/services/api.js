@@ -1,6 +1,7 @@
 import { reactive } from 'vue'
 import { buildEncryptedPassword } from './security'
 import { createNetworkAccessError } from './errors'
+import { reportNetworkFailure, reportNetworkSuccess } from './networkFeedback'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const TOKEN_KEY = 'nexgo-skills-session-token'
@@ -224,8 +225,12 @@ async function request(path, options = {}) {
       headers,
     })
   } catch (err) {
-    throw createNetworkAccessError(err)
+    const networkError = createNetworkAccessError(err)
+    reportNetworkFailure(networkError.message)
+    throw networkError
   }
+
+  reportNetworkSuccess()
 
   if (response.status === 204) {
     return null

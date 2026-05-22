@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRouter } from 'vue-router'
 
 import InfoModal from '../InfoModal.vue'
+import ConfirmDialog from '../ConfirmDialog.vue'
+import ListState from '../ListState.vue'
 import {
   authState,
   createUser,
@@ -11,16 +13,19 @@ import {
   resetUserPassword,
   updateUser,
 } from '../../services/api'
+import { notifySuccess } from '../../services/feedback'
 
 const router = useRouter()
 const loading = ref(false)
 const loadingMore = ref(false)
 const submitting = ref(false)
 const resettingId = ref(null)
+const togglingId = ref(null)
 const listError = ref('')
 const actionError = ref('')
 const loadMoreError = ref('')
 const formError = ref('')
+const pendingActionError = ref('')
 const users = ref([])
 const search = ref('')
 const page = ref(1)
@@ -30,6 +35,8 @@ const hasMore = ref(false)
 const isUserModalOpen = ref(false)
 const editingUserId = ref(null)
 const editingUserSource = ref('LOCAL')
+const pendingAction = ref(null)
+const resetPassword = ref('')
 const userSentinel = ref(null)
 const form = reactive({
   username: '',
@@ -57,6 +64,8 @@ const modalSummary = computed(() =>
     : '管理员只能手工创建本地账号，AD 用户会在首次登录时自动建档。',
 )
 const emptyStateText = computed(() => (search.value ? '未找到匹配用户。' : '当前还没有用户。'))
+const blockingListError = computed(() => (!users.value.length ? listError.value : ''))
+const refreshListError = computed(() => (users.value.length ? listError.value : ''))
 const resultsSummary = computed(() => {
   if (!total.value) {
     return search.value ? '未找到匹配用户' : '当前没有用户'
@@ -94,6 +103,12 @@ function resetForm() {
 function closeUserModal() {
   isUserModalOpen.value = false
   resetForm()
+}
+
+function closePendingAction() {
+  pendingAction.value = null
+  resetPassword.value = ''
+  pendingActionError.value = ''
 }
 
 function openCreateModal() {
@@ -170,9 +185,10 @@ async function loadUsers(options = {}) {
       loadMoreError.value = err.message
     } else {
       listError.value = err.message
-      users.value = []
-      total.value = 0
-      hasMore.value = false
+      if (!users.value.length) {
+        total.value = 0
+        hasMore.value = false
+      }
     }
   } finally {
     if (append) {
@@ -209,6 +225,7 @@ async function handleSubmit() {
       })
     }
     closeUserModal()
+    notifySuccess(isEditMode.value ? '用户信息已保存' : '用户已创建')
     await loadUsers({ page: 1, query: search.value })
   } catch (err) {
     if (err.message && err.message.includes('挑战')) {
@@ -226,23 +243,36 @@ async function handlePasswordReset(user) {
     actionError.value = 'AD 用户密码由域控管理，不支持本地重置'
     return
   }
+  actionError.value = ''
+  pendingActionError.value = ''
+  pendingAction.value = { type: 'reset-password', user }
+}
 
-  const nextPassword = window.prompt(`请输入用户「${user.username}」的新密码`)
+async function confirmPasswordReset() {
+  const user = pendingAction.value?.user
+  const nextPassword = resetPassword.value.trim()
+  if (!user) {
+    return
+  }
   if (!nextPassword) {
+    pendingActionError.value = '请输入新密码'
     return
   }
 
   resettingId.value = user.id
   actionError.value = ''
+  pendingActionError.value = ''
   loadMoreError.value = ''
   try {
     await resetUserPassword(user.id, nextPassword)
+    notifySuccess('密码已重置')
+    closePendingAction()
     await loadUsers({ page: 1, query: search.value })
   } catch (err) {
     if (err.message && err.message.includes('挑战')) {
-      actionError.value = '安全验证失败，请刷新页面后重试'
+      pendingActionError.value = '安全验证失败，请刷新页面后重试'
     } else {
-      actionError.value = err.message
+      pendingActionError.value = err.message
     }
   } finally {
     resettingId.value = null
@@ -250,13 +280,32 @@ async function handlePasswordReset(user) {
 }
 
 async function quickToggle(user) {
+  if (togglingId.value) {
+    return
+  }
   actionError.value = ''
+  pendingActionError.value = ''
+  pendingAction.value = { type: 'toggle-user', user }
+}
+
+async function confirmToggleUser() {
+  const user = pendingAction.value?.user
+  if (!user) {
+    return
+  }
+  actionError.value = ''
+  pendingActionError.value = ''
   loadMoreError.value = ''
+  togglingId.value = user.id
   try {
     await updateUser(user.id, { is_active: !user.is_active })
+    notifySuccess(user.is_active ? '用户已停用' : '用户已启用')
+    closePendingAction()
     await loadUsers({ page: 1, query: search.value })
   } catch (err) {
-    actionError.value = err.message
+    pendingActionError.value = err.message
+  } finally {
+    togglingId.value = null
   }
 }
 
@@ -369,11 +418,22 @@ onBeforeUnmount(() => {
     </div>
 
     <section v-if="actionError" class="feedback feedback--error">{{ actionError }}</section>
-    <section v-if="listError" class="feedback feedback--error">{{ listError }}</section>
-    <section v-else-if="loading && !users.length" class="feedback">正在加载用户列表...</section>
-    <section v-else-if="!users.length" class="feedback">{{ emptyStateText }}</section>
-    <template v-else>
-      <section class="admin-table-wrap">
+    <ListState
+      :error="blockingListError"
+      :loading="loading && !users.length"
+      :empty="!users.length"
+      loading-text="正在加载用户列表..."
+      :empty-text="emptyStateText"
+      @retry="() => loadUsers({ page: 1, query: search })"
+    >
+      <section v-if="refreshListError" class="feedback feedback--error list-state">
+        <span>{{ refreshListError }}</span>
+        <button class="button button--ghost" type="button" @click="loadUsers({ page: 1, query: search })">
+          重试
+        </button>
+      </section>
+
+      <section class="admin-table-wrap" :class="{ 'is-refreshing': loading }">
         <table class="admin-table admin-table--users">
           <thead>
             <tr>
@@ -407,8 +467,13 @@ onBeforeUnmount(() => {
               <td>
                 <div class="admin-table__actions">
                   <button class="button button--ghost" type="button" @click="startEdit(user)">编辑</button>
-                  <button class="button button--ghost" type="button" @click="quickToggle(user)">
-                    {{ user.is_active ? '停用' : '启用' }}
+                  <button
+                    class="button button--ghost"
+                    type="button"
+                    :disabled="togglingId === user.id"
+                    @click="quickToggle(user)"
+                  >
+                    {{ togglingId === user.id ? '处理中...' : user.is_active ? '停用' : '启用' }}
                   </button>
                   <button
                     class="button button--ghost"
@@ -435,7 +500,7 @@ onBeforeUnmount(() => {
       <p v-else class="user-management__footer">
         {{ hasMore ? '继续向下滚动以加载更多用户' : `已加载全部 ${total} 个用户` }}
       </p>
-    </template>
+    </ListState>
   </section>
 
   <InfoModal :open="isUserModalOpen" :title="modalTitle" :summary="modalSummary" width="720px" @close="closeUserModal">
@@ -467,4 +532,32 @@ onBeforeUnmount(() => {
       </div>
     </form>
   </InfoModal>
+
+  <ConfirmDialog
+    :open="pendingAction?.type === 'toggle-user'"
+    :title="pendingAction?.user?.is_active ? '停用用户' : '启用用户'"
+    :summary="pendingAction?.user ? `目标账号：${pendingAction.user.username}` : ''"
+    :confirm-label="pendingAction?.user?.is_active ? '确认停用' : '确认启用'"
+    :busy="Boolean(pendingAction?.user && togglingId === pendingAction.user.id)"
+    @close="closePendingAction"
+    @confirm="confirmToggleUser"
+  >
+    <p v-if="pendingActionError" class="feedback feedback--error feedback--inline">{{ pendingActionError }}</p>
+  </ConfirmDialog>
+
+  <ConfirmDialog
+    :open="pendingAction?.type === 'reset-password'"
+    title="重置用户密码"
+    :summary="pendingAction?.user ? `目标账号：${pendingAction.user.username}` : ''"
+    confirm-label="确认重置"
+    :busy="Boolean(pendingAction?.user && resettingId === pendingAction.user.id)"
+    @close="closePendingAction"
+    @confirm="confirmPasswordReset"
+  >
+    <label class="field">
+      <span>新密码</span>
+      <input v-model="resetPassword" class="text-input" type="password" autocomplete="new-password" />
+    </label>
+    <p v-if="pendingActionError" class="feedback feedback--error feedback--inline">{{ pendingActionError }}</p>
+  </ConfirmDialog>
 </template>
