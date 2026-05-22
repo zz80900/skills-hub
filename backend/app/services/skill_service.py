@@ -143,7 +143,7 @@ async def validate_zip_file(upload_file: UploadFile) -> bytes:
 
 
 def get_install_command(skill_name: str) -> str:
-    return f"nexgo-skills install {skill_name}"
+    return f"npx nexgo-skills install {skill_name}"
 
 
 def get_next_version(current_version: str) -> str:

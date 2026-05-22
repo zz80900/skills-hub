@@ -111,9 +111,9 @@ class SkillsHomepageParser(HTMLParser):
         return fallback_name
 
 
-def build_remote_install_command(source: str, skill_name: str) -> str:
-    repository_url = f'https://github.com/{source.strip().strip("/")}'
-    return f'nexgo-skills add "{repository_url}" --as --skill "{skill_name}"'
+def build_remote_install_command(skill_ref: str) -> str:
+    skill_ref = skill_ref.strip().strip("/")
+    return f"npx nexgo-skills install {skill_ref}"
 
 
 def _paginate(items: list[RegistrySkillSummary], page: int, page_size: int) -> tuple[list[RegistrySkillSummary], bool]:
@@ -131,7 +131,7 @@ def _normalize_remote_record(slug: str, source: str, name: str, installs: int | 
         source=normalized_source,
         installs=installs,
         description_html=_build_summary_html(normalized_source, installs),
-        install_command=build_remote_install_command(normalized_source, normalized_name),
+        install_command=build_remote_install_command(slug),
     )
 
 
@@ -318,7 +318,7 @@ async def get_remote_skill_detail(slug: str) -> RegistrySkillDetail:
         source=source,
         installs=installs,
         description_html=description_html,
-        install_command=build_remote_install_command(source, name),
+        install_command=build_remote_install_command(normalized_slug),
         detail_url=detail_url,
     )
 

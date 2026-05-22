@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 首页展示 CLI 安装提示和 Skills 列表
+- 首页展示 Skills 列表，并在使用教程中提示 Node.js / npx 前置条件
 - 支持按 Skill 名称和描述搜索
 - Skill 详情页展示 Markdown 描述、安装命令和 ZIP 下载地址
 - 采用基础 RBAC0 权限模型，固定角色为管理员和普通用户
