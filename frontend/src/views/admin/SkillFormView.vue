@@ -377,13 +377,9 @@ watch(
             <section v-if="showZipGuidance" id="zip-package-guidance" class="zip-guidance" role="note">
               <p class="zip-guidance__title">推荐压缩包根目录</p>
               <pre class="zip-guidance__tree"><code>your-skill.zip
-|- SKILL.md
-\- cmd        # 可选，仅当需要额外安装 CLI</code></pre>
+|- SKILL.md</code></pre>
               <ul class="zip-guidance__list">
                 <li>根目录必须存在非空 <code>SKILL.md</code>。</li>
-                <li>如需额外安装 CLI，可在根目录提供一个名为 <code>cmd</code> 的文件。</li>
-                <li><code>cmd</code> 只能包含一条以 <code>npm install</code> 开头的命令。</li>
-                <li><code>cmd</code> 不能包含其他命令、命令拼接或多行脚本。</li>
               </ul>
             </section>
 
