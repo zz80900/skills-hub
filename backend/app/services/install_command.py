@@ -3,18 +3,9 @@ from app.core.config import get_settings
 
 def build_skill_install_command(skill_ref: str) -> str:
     normalized_ref = skill_ref.strip().strip("/")
-    skill_name = normalized_ref.rsplit("/", 1)[-1]
-    return get_settings().skill_install_command_template.format(
-        skill_ref=normalized_ref,
-        skill_name=skill_name,
-    )
+    return f"{get_settings().nexgo_skills_install_command} {normalized_ref}"
 
 
-def build_collection_install_command(collection_slug: str, version: str | None = None) -> str:
+def build_collection_install_command(collection_slug: str) -> str:
     normalized_slug = collection_slug.strip().strip("/")
-    normalized_version = (version or "").strip()
-    return get_settings().collection_install_command_template.format(
-        collection_ref=normalized_slug,
-        collection_slug=normalized_slug,
-        version=normalized_version,
-    )
+    return f"{get_settings().nexgo_skills_install_command} collection {normalized_slug}"

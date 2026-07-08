@@ -2527,51 +2527,34 @@ def test_public_remote_failure_does_not_break_local_results(client: TestClient, 
 
 
 def test_public_config_returns_cli_install_command(client: TestClient, monkeypatch):
-    monkeypatch.setenv("CLI_INSTALL_COMMAND", "npx nexgo-skills --help")
+    monkeypatch.setenv("NEXGO_SKILLS_INSTALL_COMMAND", "internal-cli add")
     get_settings.cache_clear()
     try:
         response = client.get("/api/public-config")
         assert response.status_code == 200
         command = response.json()["cli_install_command"]
-        assert command == "npx nexgo-skills --help"
+        assert command == "internal-cli add --help"
     finally:
+        monkeypatch.delenv("NEXGO_SKILLS_INSTALL_COMMAND", raising=False)
         get_settings.cache_clear()
 
 
-def test_skill_install_command_template_configures_local_and_remote(monkeypatch):
-    monkeypatch.setenv(
-        "SKILL_INSTALL_COMMAND_TEMPLATE",
-        "internal-skill install {skill_ref} --name {skill_name}",
-    )
+def test_nexgo_skills_install_command_configures_all_install_commands(client: TestClient, monkeypatch):
+    monkeypatch.setenv("NEXGO_SKILLS_INSTALL_COMMAND", "internal-cli add")
     get_settings.cache_clear()
 
     try:
-        assert skill_service.get_install_command("demo-skill") == (
-            "internal-skill install demo-skill --name demo-skill"
-        )
+        assert skill_service.get_install_command("demo-skill") == "internal-cli add demo-skill"
         assert build_remote_install_command("vercel-labs/agent-skills/frontend-design") == (
-            "internal-skill install vercel-labs/agent-skills/frontend-design --name frontend-design"
+            "internal-cli add vercel-labs/agent-skills/frontend-design"
         )
-    finally:
-        monkeypatch.delenv("SKILL_INSTALL_COMMAND_TEMPLATE", raising=False)
-        get_settings.cache_clear()
-
-
-def test_collection_install_command_template_configures_collection_responses(client: TestClient, monkeypatch):
-    monkeypatch.setenv(
-        "COLLECTION_INSTALL_COMMAND_TEMPLATE",
-        "internal-collection install {collection_ref} --slug {collection_slug} --version {version}",
-    )
-    get_settings.cache_clear()
-
-    try:
-        assert collection_service.get_collection_install_command("frontend-basic", "1.0.0") == (
-            "internal-collection install frontend-basic --slug frontend-basic --version 1.0.0"
+        assert collection_service.get_collection_install_command("frontend-basic") == (
+            "internal-cli add collection frontend-basic"
         )
 
         headers = auth_headers(client)
         create_response = create_collection_record(client, monkeypatch, headers)
-        expected_command = "internal-collection install frontend-basic --slug frontend-basic --version 1.0.0"
+        expected_command = "internal-cli add collection frontend-basic"
         assert create_response.json()["install_command"] == expected_command
 
         public_list = client.get("/api/collections")
@@ -2587,12 +2570,12 @@ def test_collection_install_command_template_configures_collection_responses(cli
         collection_items = [item for item in local_library.json()["items"] if item["kind"] == "collection"]
         assert collection_items[0]["install_command"] == expected_command
     finally:
-        monkeypatch.delenv("COLLECTION_INSTALL_COMMAND_TEMPLATE", raising=False)
+        monkeypatch.delenv("NEXGO_SKILLS_INSTALL_COMMAND", raising=False)
         get_settings.cache_clear()
 
 
 def test_skill_install_command_default_uses_latest_npm_package(monkeypatch):
-    monkeypatch.delenv("SKILL_INSTALL_COMMAND_TEMPLATE", raising=False)
+    monkeypatch.delenv("NEXGO_SKILLS_INSTALL_COMMAND", raising=False)
     get_settings.cache_clear()
 
     try:
@@ -2601,6 +2584,9 @@ def test_skill_install_command_default_uses_latest_npm_package(monkeypatch):
         )
         assert build_remote_install_command("vercel-labs/agent-skills/frontend-design") == (
             "npx nexgo-skills@latest install vercel-labs/agent-skills/frontend-design"
+        )
+        assert collection_service.get_collection_install_command("frontend-basic") == (
+            "npx nexgo-skills@latest install collection frontend-basic"
         )
     finally:
         get_settings.cache_clear()

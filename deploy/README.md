@@ -39,9 +39,7 @@ NEXUS_RAW_BASE_URL=http://nexus.example.invalid:8081/repository/raw-repo/skills
 NEXUS_USERNAME=your-nexus-username
 NEXUS_PASSWORD=your-nexus-password
 CORS_ORIGINS=http://localhost:8000
-CLI_INSTALL_COMMAND=npx nexgo-skills --help
-SKILL_INSTALL_COMMAND_TEMPLATE=npx nexgo-skills@latest install {skill_ref}
-COLLECTION_INSTALL_COMMAND_TEMPLATE=npx nexgo-skills@latest install collection {collection_ref}
+NEXGO_SKILLS_INSTALL_COMMAND=npx nexgo-skills@latest install
 ```
 
 AD 配置最小示例：

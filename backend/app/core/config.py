@@ -1,14 +1,10 @@
 from functools import lru_cache
-from string import Formatter
 from typing import Annotated
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-INSTALL_COMMAND_TEMPLATE_FIELDS = {"skill_ref", "skill_name"}
-COLLECTION_INSTALL_COMMAND_TEMPLATE_FIELDS = {"collection_ref", "collection_slug", "version"}
-DEFAULT_SKILL_INSTALL_COMMAND_TEMPLATE = "npx nexgo-skills@latest install {skill_ref}"
-DEFAULT_COLLECTION_INSTALL_COMMAND_TEMPLATE = "npx nexgo-skills@latest install collection {collection_ref}"
+DEFAULT_NEXGO_SKILLS_INSTALL_COMMAND = "npx nexgo-skills@latest install"
 
 
 class Settings(BaseSettings):
@@ -16,6 +12,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     app_title: str = "NEXGO Skills"
@@ -50,9 +47,11 @@ class Settings(BaseSettings):
     )
     skills_api_base_url: str = "https://skills.sh"
     skills_api_timeout_seconds: float = 15.0
-    cli_install_command: str = "npx nexgo-skills --help"
-    skill_install_command_template: str = DEFAULT_SKILL_INSTALL_COMMAND_TEMPLATE
-    collection_install_command_template: str = DEFAULT_COLLECTION_INSTALL_COMMAND_TEMPLATE
+    nexgo_skills_install_command: str = DEFAULT_NEXGO_SKILLS_INSTALL_COMMAND
+
+    @property
+    def cli_install_command(self) -> str:
+        return f"{self.nexgo_skills_install_command} --help"
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -63,57 +62,15 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return ["http://localhost:5173"]
 
-    @field_validator("skill_install_command_template")
+    @field_validator("nexgo_skills_install_command")
     @classmethod
-    def validate_skill_install_command_template(cls, value: str) -> str:
-        template = (value or "").strip()
-        if not template:
-            return DEFAULT_SKILL_INSTALL_COMMAND_TEMPLATE
-
-        fields: set[str] = set()
-        for _, field_name, _, _ in Formatter().parse(template):
-            if field_name is None:
-                continue
-            root_name = field_name.split(".", 1)[0].split("[", 1)[0]
-            if not root_name:
-                raise ValueError("skill_install_command_template 不支持位置占位符")
-            fields.add(root_name)
-
-        unknown_fields = fields - INSTALL_COMMAND_TEMPLATE_FIELDS
-        if unknown_fields:
-            names = ", ".join(sorted(unknown_fields))
-            raise ValueError(f"skill_install_command_template 包含不支持的占位符：{names}")
-        if not fields:
-            raise ValueError("skill_install_command_template 必须包含 {skill_ref} 或 {skill_name}")
-
-        template.format(skill_ref="demo-skill", skill_name="demo-skill")
-        return template
-
-    @field_validator("collection_install_command_template")
-    @classmethod
-    def validate_collection_install_command_template(cls, value: str) -> str:
-        template = (value or "").strip()
-        if not template:
-            return DEFAULT_COLLECTION_INSTALL_COMMAND_TEMPLATE
-
-        fields: set[str] = set()
-        for _, field_name, _, _ in Formatter().parse(template):
-            if field_name is None:
-                continue
-            root_name = field_name.split(".", 1)[0].split("[", 1)[0]
-            if not root_name:
-                raise ValueError("collection_install_command_template 不支持位置占位符")
-            fields.add(root_name)
-
-        unknown_fields = fields - COLLECTION_INSTALL_COMMAND_TEMPLATE_FIELDS
-        if unknown_fields:
-            names = ", ".join(sorted(unknown_fields))
-            raise ValueError(f"collection_install_command_template 包含不支持的占位符：{names}")
-        if not fields:
-            raise ValueError("collection_install_command_template 必须包含 {collection_ref} 或 {collection_slug}")
-
-        template.format(collection_ref="frontend-basic", collection_slug="frontend-basic", version="1.0.0")
-        return template
+    def validate_nexgo_skills_install_command(cls, value: str) -> str:
+        command = (value or "").strip()
+        if not command:
+            return DEFAULT_NEXGO_SKILLS_INSTALL_COMMAND
+        if "{" in command or "}" in command:
+            raise ValueError("nexgo_skills_install_command 只配置安装命令前缀，不支持占位符")
+        return command
 
 
 @lru_cache
