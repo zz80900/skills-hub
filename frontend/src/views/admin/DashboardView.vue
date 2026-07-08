@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
+import CollectionManagementPanel from '../../components/user-center/CollectionManagementPanel.vue'
 import GroupManagementPanel from '../../components/user-center/GroupManagementPanel.vue'
 import SkillManagementPanel from '../../components/user-center/SkillManagementPanel.vue'
 import UserManagementPanel from '../../components/user-center/UserManagementPanel.vue'
@@ -22,7 +23,10 @@ const userCenterLabel = computed(() => {
 })
 
 const tabs = computed(() => {
-  const items = [{ key: 'skills', label: 'Skill 管理' }]
+  const items = [
+    { key: 'skills', label: 'Skill 管理' },
+    { key: 'collections', label: 'Skill 集合管理' },
+  ]
   if (isAdmin.value || hasManagedGroups.value) {
     items.push({ key: 'groups', label: '组管理' })
   }
@@ -125,6 +129,7 @@ onMounted(() => {
           </header>
 
           <SkillManagementPanel v-if="activeTab === 'skills'" />
+          <CollectionManagementPanel v-else-if="activeTab === 'collections'" />
           <GroupManagementPanel v-else-if="activeTab === 'groups'" />
           <UserManagementPanel v-else />
         </div>

@@ -3,12 +3,20 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
-import { authState, createSkill, fetchGroupOptions, fetchOrganizationOptions, fetchWorkspaceSkill, updateSkill } from '../../services/api'
+import {
+  authState,
+  createCollection,
+  fetchGroupOptions,
+  fetchOrganizationOptions,
+  fetchWorkspaceCollection,
+  previewCollectionZip,
+  updateCollection,
+} from '../../services/api'
 
-const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const route = useRoute()
 const router = useRouter()
-const isEditMode = computed(() => Boolean(route.params.name))
+const isEditMode = computed(() => Boolean(route.params.slug))
 const isAdmin = computed(() => authState.user?.role === 'ADMIN')
 const loading = ref(false)
 const submitting = ref(false)
@@ -17,6 +25,9 @@ const selectedFileName = ref('')
 const fileError = ref('')
 const currentVersion = ref('')
 const showZipGuidance = ref(false)
+const preview = ref(null)
+const previewLoading = ref(false)
+const previewError = ref('')
 const groupOptionsLoading = ref(false)
 const groupOptionsError = ref('')
 const groupOptions = ref([])
@@ -30,7 +41,7 @@ const scopeOptions = [
 ]
 const form = reactive({
   name: '',
-  contributor: '',
+  slug: '',
   description_markdown: '',
   scope_type: 'PUBLIC',
   group_id: '',
@@ -53,11 +64,11 @@ const selectedScopeHelp = computed(() => {
   if (form.scope_type === 'ORGANIZATION') {
     return '所选组织及子组织成员可见。'
   }
-  return '所有已登录用户均可发现。'
+  return '所有访客都可发现。'
 })
-const isNameReady = computed(() => {
-  const normalizedName = form.name.trim()
-  return Boolean(normalizedName && skillNamePattern.test(normalizedName))
+const isSlugReady = computed(() => {
+  const normalizedSlug = form.slug.trim()
+  return Boolean(normalizedSlug && slugPattern.test(normalizedSlug))
 })
 const isScopeReady = computed(() => {
   if (form.scope_type === 'GROUP') {
@@ -71,13 +82,13 @@ const isScopeReady = computed(() => {
 const formChecklist = computed(() => [
   {
     key: 'package',
-    label: isEditMode.value ? '升级包可选' : 'ZIP 包',
+    label: isEditMode.value ? '升级包可选' : 'Skill 集合 ZIP',
     done: isEditMode.value || Boolean(form.zip_file),
   },
   {
-    key: 'identity',
-    label: '名称合法',
-    done: isNameReady.value,
+    key: 'slug',
+    label: 'slug 合法',
+    done: isSlugReady.value,
   },
   {
     key: 'scope',
@@ -85,48 +96,84 @@ const formChecklist = computed(() => [
     done: isScopeReady.value,
   },
   {
-    key: 'description',
-    label: '描述已填写',
-    done: Boolean(form.description_markdown.trim()),
+    key: 'preview',
+    label: preview.value ? `${preview.value.item_count} 个 Skill` : '等待预览',
+    done: Boolean(preview.value) || isEditMode.value,
   },
 ])
+const nextPreviewVersion = computed(() => {
+  if (!isEditMode.value) {
+    return '1.0.0'
+  }
+  return getNextVersion(currentVersion.value)
+})
 const submitHint = computed(() => {
   if (submitting.value) {
     return '正在提交，请保持页面打开。'
   }
   if (isEditMode.value) {
-    return form.zip_file ? '保存后会生成新版本。' : '未选择 ZIP 时只更新描述和范围。'
+    return form.zip_file ? '保存后会生成新 Skill 集合版本。' : '未选择 ZIP 时只更新元数据和范围。'
   }
-  return '创建成功后会进入 Skill 详情页。'
+  return '创建成功后会进入 Skill 集合详情页。'
 })
 
-function onFileChange(event) {
-  const [file] = event.target.files || []
-  fileError.value = ''
-  form.zip_file = file || null
-  selectedFileName.value = file?.name || ''
-  if (file && !file.name.toLowerCase().endsWith('.zip')) {
-    fileError.value = '请上传 ZIP 压缩包'
-    form.zip_file = null
+function getNextVersion(version) {
+  const match = /^([0-9])\.([0-9])\.([0-9])$/.exec(version || '')
+  if (!match) {
+    return '-'
   }
+  let major = Number(match[1])
+  let minor = Number(match[2])
+  let patch = Number(match[3])
+  if (major === 9 && minor === 9 && patch === 9) {
+    return '已达上限'
+  }
+  if (patch < 9) {
+    patch += 1
+  } else {
+    patch = 0
+    if (minor < 9) {
+      minor += 1
+    } else {
+      minor = 0
+      major += 1
+    }
+  }
+  return `${major}.${minor}.${patch}`
 }
 
-function toggleZipGuidance() {
-  showZipGuidance.value = !showZipGuidance.value
+function validateSlug(slug) {
+  const normalizedSlug = (slug || '').trim()
+  if (!normalizedSlug) {
+    throw new Error('请输入 Skill 集合 slug')
+  }
+  if (/\s/.test(normalizedSlug)) {
+    throw new Error('Skill 集合 slug 不能包含空格')
+  }
+  if (!slugPattern.test(normalizedSlug)) {
+    throw new Error('Skill 集合 slug 只允许小写字母、数字和中划线')
+  }
+  return normalizedSlug
 }
 
-function validateSkillName(name) {
+function validateName(name) {
   const normalizedName = (name || '').trim()
   if (!normalizedName) {
-    throw new Error('请输入 Skill 名称')
-  }
-  if (/\s/.test(normalizedName)) {
-    throw new Error('Skill 名称不能包含空格')
-  }
-  if (!skillNamePattern.test(normalizedName)) {
-    throw new Error('Skill 名称只允许小写字母、数字和中划线')
+    throw new Error('请输入 Skill 集合名称')
   }
   return normalizedName
+}
+
+function validateScope() {
+  if (form.scope_type === 'GROUP' && !form.group_id) {
+    throw new Error('请选择归属组')
+  }
+  if (form.scope_type === 'ORGANIZATION') {
+    syncOrganizationSelection()
+    if (!form.scope_org_level || !form.scope_org_name || !form.scope_org_path) {
+      throw new Error('请选择归属组织')
+    }
+  }
 }
 
 function mergeGroupOption(option) {
@@ -194,39 +241,64 @@ function resetOrganizationScope() {
   form.scope_org_path = ''
 }
 
-function validateScope() {
-  if (form.scope_type === 'GROUP' && !form.group_id) {
-    throw new Error('请选择归属组')
+async function loadPreview() {
+  preview.value = null
+  previewError.value = ''
+  if (!form.zip_file) {
+    return
   }
-  if (form.scope_type === 'ORGANIZATION') {
-    syncOrganizationSelection()
-    if (!form.scope_org_level || !form.scope_org_name || !form.scope_org_path) {
-      throw new Error('请选择归属组织')
-    }
+  previewLoading.value = true
+  try {
+    const payload = new FormData()
+    payload.append('zip_file', form.zip_file)
+    preview.value = await previewCollectionZip(payload)
+  } catch (err) {
+    previewError.value = err.message
+  } finally {
+    previewLoading.value = false
   }
 }
 
-async function loadSkill() {
+function onFileChange(event) {
+  const [file] = event.target.files || []
+  fileError.value = ''
+  preview.value = null
+  previewError.value = ''
+  form.zip_file = file || null
+  selectedFileName.value = file?.name || ''
+  if (file && !file.name.toLowerCase().endsWith('.zip')) {
+    fileError.value = '请上传 ZIP 压缩包'
+    form.zip_file = null
+    return
+  }
+  loadPreview()
+}
+
+function toggleZipGuidance() {
+  showZipGuidance.value = !showZipGuidance.value
+}
+
+async function loadCollection() {
   if (!isEditMode.value) {
     return
   }
   loading.value = true
   error.value = ''
   try {
-    const skill = await fetchWorkspaceSkill(route.params.name)
-    form.name = skill.name
-    form.contributor = skill.contributor || ''
-    form.description_markdown = skill.description_markdown
-    form.scope_type = skill.scope_type || (skill.group_id ? 'GROUP' : 'PUBLIC')
-    form.group_id = skill.group_id ? String(skill.group_id) : ''
-    form.scope_org_level = skill.scope_org_level ? String(skill.scope_org_level) : ''
-    form.scope_org_name = skill.scope_org_name || ''
-    form.scope_org_path = skill.scope_org_path || ''
-    currentVersion.value = skill.current_version
-    if (skill.group_id) {
+    const collection = await fetchWorkspaceCollection(route.params.slug)
+    form.name = collection.name
+    form.slug = collection.slug
+    form.description_markdown = collection.description_markdown
+    form.scope_type = collection.scope_type || (collection.group_id ? 'GROUP' : 'PUBLIC')
+    form.group_id = collection.group_id ? String(collection.group_id) : ''
+    form.scope_org_level = collection.scope_org_level ? String(collection.scope_org_level) : ''
+    form.scope_org_name = collection.scope_org_name || ''
+    form.scope_org_path = collection.scope_org_path || ''
+    currentVersion.value = collection.current_version
+    if (collection.group_id) {
       mergeGroupOption({
-        id: skill.group_id,
-        name: skill.group_name || `组 #${skill.group_id}`,
+        id: collection.group_id,
+        name: collection.group_name || `组 #${collection.group_id}`,
         description: null,
         leader_user_id: null,
         leader_username: '',
@@ -246,29 +318,31 @@ async function handleSubmit() {
   try {
     const payload = new FormData()
     validateScope()
+    const validatedName = validateName(form.name)
+    const validatedSlug = validateSlug(form.slug)
+    payload.append('name', validatedName)
     payload.append('description_markdown', form.description_markdown)
     payload.append('scope_type', form.scope_type || 'PUBLIC')
     payload.append('group_id', form.scope_type === 'GROUP' ? form.group_id : '')
     payload.append('scope_org_level', form.scope_type === 'ORGANIZATION' ? form.scope_org_level : '')
     payload.append('scope_org_name', form.scope_type === 'ORGANIZATION' ? form.scope_org_name : '')
     payload.append('scope_org_path', form.scope_type === 'ORGANIZATION' ? form.scope_org_path : '')
-    const validatedName = validateSkillName(form.name)
 
     if (isEditMode.value) {
       if (form.zip_file) {
         payload.append('zip_file', form.zip_file)
       }
-      await updateSkill(validatedName, payload)
-      router.push(`/workspace/skills/${validatedName}`)
+      await updateCollection(route.params.slug, payload)
+      router.push(`/workspace/collections/${validatedSlug}`)
     } else {
-      payload.append('name', validatedName)
+      payload.append('slug', validatedSlug)
       if (!form.zip_file) {
-        fileError.value = '请上传 ZIP 压缩包'
-        throw new Error('请上传 ZIP 压缩包')
+        fileError.value = '请上传 Skill 集合 ZIP'
+        throw new Error('请上传 Skill 集合 ZIP')
       }
       payload.append('zip_file', form.zip_file)
-      const createdSkill = await createSkill(payload)
-      router.push(`/workspace/skills/${createdSkill.name}`)
+      const createdCollection = await createCollection(payload)
+      router.push(`/workspace/collections/${createdCollection.slug}`)
     }
   } catch (err) {
     error.value = err.message
@@ -280,7 +354,7 @@ async function handleSubmit() {
 onMounted(() => {
   loadGroupOptions()
   loadOrganizationOptions()
-  loadSkill()
+  loadCollection()
 })
 
 watch(
@@ -307,16 +381,12 @@ watch(
       <section class="skill-form-shell">
         <aside class="skill-form-rail">
           <div class="skill-form-rail__heading">
-            <h1>{{ isEditMode ? '编辑 Skill' : '新增 Skill' }}</h1>
-            <span>{{ isAdmin ? '工作台' : '我的 Skill' }}</span>
+            <h1>{{ isEditMode ? '编辑 Skill 集合' : '新增 Skill 集合' }}</h1>
+            <span>{{ isAdmin ? '工作台' : '我的 Skill 集合' }}</span>
           </div>
 
           <ol class="submission-checklist" aria-label="提交检查">
-            <li
-              v-for="item in formChecklist"
-              :key="item.key"
-              :class="{ 'is-done': item.done }"
-            >
+            <li v-for="item in formChecklist" :key="item.key" :class="{ 'is-done': item.done }">
               <span aria-hidden="true">{{ item.done ? '✓' : '·' }}</span>
               <strong>{{ item.label }}</strong>
             </li>
@@ -328,73 +398,93 @@ watch(
         </aside>
 
         <section class="skill-form-main">
-          <section v-if="loading" class="feedback">正在加载 Skill...</section>
+          <section v-if="loading" class="feedback">正在加载 Skill 集合...</section>
 
           <form v-else class="skill-form" @submit.prevent="handleSubmit">
             <section class="form-section">
               <div class="section-heading section-heading--inline">
                 <div>
-                  <h2>{{ isEditMode ? '升级包' : 'ZIP 包' }}</h2>
-                  <p>根目录需包含非空 <code>SKILL.md</code>，<code>cmd</code> 只作为普通文件保存。</p>
+                  <h2>{{ isEditMode ? '升级包' : 'Skill 集合 ZIP' }}</h2>
+                  <p>根目录下每个一级目录都是一个 Skill，目录内需直接包含非空 <code>SKILL.md</code>。</p>
                 </div>
                 <button
                   class="button button--ghost button--compact"
                   type="button"
                   :aria-expanded="showZipGuidance ? 'true' : 'false'"
-                  aria-controls="zip-package-guidance"
+                  aria-controls="collection-zip-guidance"
                   @click="toggleZipGuidance"
                 >
                   {{ showZipGuidance ? '收起' : '格式' }}
                 </button>
               </div>
 
-              <section v-if="showZipGuidance" id="zip-package-guidance" class="zip-guidance" role="note">
-                <p class="zip-guidance__title">推荐压缩包根目录</p>
-                <pre class="zip-guidance__tree"><code>your-skill.zip
-|- SKILL.md
-\- cmd        # 可选，普通文本文件</code></pre>
+              <section v-if="showZipGuidance" id="collection-zip-guidance" class="zip-guidance" role="note">
+                <p class="zip-guidance__title">Skill 集合压缩包根目录</p>
+                <pre class="zip-guidance__tree"><code>frontend-basic.zip
+|- frontend-design/
+|  |- SKILL.md
+|  \- references/
+\- code-review/
+   \- SKILL.md</code></pre>
                 <ul class="zip-guidance__list">
-                  <li>不要把 <code>SKILL.md</code> 放在二级目录。</li>
-                  <li><code>cmd</code> 不会被服务端或 CLI 解析、校验或执行。</li>
+                  <li>根目录不要放 <code>README.md</code>、<code>collection.json</code> 或其他普通文件。</li>
+                  <li>不需要 <code>skills/</code>、<code>codex/</code> 或 <code>claude-code/</code> 包裹目录。</li>
                 </ul>
               </section>
 
-              <label class="upload-dropzone upload-dropzone--large" for="skill-zip-file">
-                <input id="skill-zip-file" class="upload-dropzone__input" type="file" accept=".zip" @change="onFileChange" />
+              <label class="upload-dropzone upload-dropzone--large" for="collection-zip-file">
+                <input id="collection-zip-file" class="upload-dropzone__input" type="file" accept=".zip" @change="onFileChange" />
                 <span class="upload-dropzone__title">
-                  {{ selectedFileName || (isEditMode ? '选择新版本包' : '选择 ZIP 包') }}
+                  {{ selectedFileName || (isEditMode ? '选择新版本 Skill 集合包' : '选择 Skill 集合 ZIP') }}
                 </span>
                 <span class="upload-dropzone__hint">
-                  {{ selectedFileName ? '提交时会上传处理。' : isEditMode ? '不选择则沿用当前版本。' : '支持 .zip 文件。' }}
+                  {{ selectedFileName ? '已选择，正在用于预览和提交。' : isEditMode ? '不选择则只更新元数据。' : '支持 .zip 文件。' }}
                 </span>
               </label>
               <small v-if="fileError" class="feedback feedback--error feedback--inline">{{ fileError }}</small>
+
+              <section v-if="previewLoading || preview || previewError" class="collection-preview" aria-live="polite">
+                <span v-if="previewLoading">正在解析 Skill 集合 ZIP...</span>
+                <template v-else-if="preview">
+                  <div class="collection-preview__header">
+                    <strong>{{ isEditMode ? '将生成版本' : '初始版本' }} {{ nextPreviewVersion }}</strong>
+                    <span>{{ preview.item_count }} 个 Skill</span>
+                  </div>
+                  <ul class="collection-preview__list">
+                    <li v-for="item in preview.items" :key="item.path">
+                      <span>{{ item.name }}</span>
+                      <code>{{ item.sha256.slice(0, 12) }}</code>
+                    </li>
+                  </ul>
+                </template>
+                <span v-else class="feedback--error">{{ previewError }}</span>
+              </section>
             </section>
 
-            <section class="form-section">
+            <section class="form-section form-section--identity">
               <div class="section-heading">
                 <h2>基本信息</h2>
               </div>
-              <div class="form-grid">
+              <div class="collection-identity-grid">
                 <label class="field">
-                  <span>Skill 名称</span>
+                  <span class="field__label-line">
+                    <span class="field__label-text">Skill 集合名称</span>
+                  </span>
+                  <input v-model="form.name" class="text-input" type="text" placeholder="例如：前端基础工作流" />
+                </label>
+
+                <label class="field">
+                  <span class="field__label-line">
+                    <span class="field__label-text">Skill 集合 slug</span>
+                    <small id="collection-slug-hint" class="field__hint field__hint--inline">仅小写字母、数字和中划线</small>
+                  </span>
                   <input
-                    v-model="form.name"
+                    v-model="form.slug"
                     class="text-input"
                     type="text"
                     :disabled="isEditMode"
-                    placeholder="例如：plm-assistant"
-                  />
-                  <small class="field__hint">仅小写字母、数字和中划线。</small>
-                </label>
-
-                <label v-if="isEditMode" class="field">
-                  <span>上传者</span>
-                  <input
-                    v-model="form.contributor"
-                    class="text-input"
-                    type="text"
-                    disabled
+                    aria-describedby="collection-slug-hint"
+                    placeholder="例如：frontend-basic"
                   />
                 </label>
               </div>
@@ -475,7 +565,7 @@ watch(
                   v-model="form.description_markdown"
                   class="text-area text-area--markdown"
                   rows="14"
-                  placeholder="写清用途、安装方式和注意事项"
+                  placeholder="写清 Skill 集合用途、包含的 Skill 和适用场景"
                 />
               </label>
             </section>
@@ -486,9 +576,9 @@ watch(
               <p>{{ submitHint }}</p>
               <div class="form-actions">
                 <button class="button" :disabled="submitting" type="submit">
-                  {{ submitting ? '提交中...' : isEditMode ? '保存并升级' : '创建 Skill' }}
+                  {{ submitting ? '提交中...' : isEditMode ? '保存 Skill 集合' : '创建 Skill 集合' }}
                 </button>
-                <router-link class="button button--ghost" :to="isEditMode ? `/workspace/skills/${form.name}` : '/workspace'">
+                <router-link class="button button--ghost" :to="isEditMode ? `/workspace/collections/${form.slug}` : '/workspace?tab=collections'">
                   {{ isEditMode ? '返回详情' : '返回列表' }}
                 </router-link>
               </div>

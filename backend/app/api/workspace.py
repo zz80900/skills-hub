@@ -4,8 +4,26 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import DbSession, get_current_user
 from app.models.user import User
 from app.schemas.auth import MessageResponse
+from app.schemas.collection import CollectionPreviewResponse, ManagedCollectionDetail, ManagedCollectionSummary
 from app.schemas.group import GroupMemberCreateRequest, GroupMemberSummary, GroupMembersUpdateRequest, GroupOption, GroupSummary
 from app.schemas.skill import ManagedSkillDetail, ManagedSkillSummary, OrganizationScopeOption
+from app.services.collection_service import (
+    INITIAL_COLLECTION_VERSION,
+    create_collection,
+    get_collection_by_slug,
+    get_collection_snapshots,
+    get_next_collection_version,
+    get_workspace_collection_by_slug,
+    resolve_collection_scope,
+    search_workspace_collections,
+    soft_delete_collection,
+    to_collection_detail,
+    to_collection_summary,
+    update_collection,
+    validate_collection_name,
+    validate_collection_slug,
+    validate_collection_zip_file,
+)
 from app.services.group_service import (
     add_group_member,
     can_manage_group_members,
@@ -110,6 +128,162 @@ def list_workspace_organization_options(
         OrganizationScopeOption.model_validate(option)
         for option in list_organization_scope_options(session, current_user)
     ]
+
+
+@router.get("/collections", response_model=list[ManagedCollectionSummary])
+def list_workspace_collections(
+    session: DbSession,
+    current_user: User = Depends(get_current_user),
+    q: str | None = None,
+):
+    return [
+        ManagedCollectionSummary.model_validate(to_collection_summary(collection))
+        for collection in search_workspace_collections(session, current_user, q)
+    ]
+
+
+@router.post("/collections/preview", response_model=CollectionPreviewResponse)
+async def preview_workspace_collection_zip(
+    current_user: User = Depends(get_current_user),
+    zip_file: UploadFile = File(...),
+):
+    _, parsed_zip = await validate_collection_zip_file(zip_file)
+    return CollectionPreviewResponse(
+        version=INITIAL_COLLECTION_VERSION,
+        item_count=len(parsed_zip.items),
+        items=[item.__dict__ for item in parsed_zip.items],
+    )
+
+
+@router.get("/collections/{slug}", response_model=ManagedCollectionDetail)
+def get_workspace_collection(slug: str, session: DbSession, current_user: User = Depends(get_current_user)):
+    collection = get_workspace_collection_by_slug(session, validate_collection_slug(slug), current_user)
+    if collection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 集合不存在")
+    snapshots = get_collection_snapshots(session, collection)
+    return ManagedCollectionDetail.model_validate(to_collection_detail(collection, snapshots))
+
+
+@router.post("/collections", response_model=ManagedCollectionDetail, status_code=status.HTTP_201_CREATED)
+async def create_workspace_collection(
+    session: DbSession,
+    current_user: User = Depends(get_current_user),
+    name: str = Form(...),
+    slug: str = Form(...),
+    description_markdown: str = Form(""),
+    scope_type: str = Form(default="PUBLIC"),
+    group_id: str = Form(default=""),
+    scope_org_level: str = Form(default=""),
+    scope_org_name: str = Form(default=""),
+    scope_org_path: str = Form(default=""),
+    zip_file: UploadFile = File(...),
+):
+    validated_slug = validate_collection_slug(slug)
+    validated_name = validate_collection_name(name)
+    if get_collection_by_slug(session, validated_slug) is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Skill 集合已存在")
+
+    zip_content, parsed_zip = await validate_collection_zip_file(zip_file)
+    resolved_scope_type, group, resolved_org_level, resolved_org_name, resolved_org_path = resolve_collection_scope(
+        session,
+        current_user,
+        scope_type=scope_type,
+        group_id=_parse_group_id(group_id),
+        scope_org_level=_parse_optional_positive_int(scope_org_level, "scope_org_level"),
+        scope_org_name=scope_org_name,
+        scope_org_path=scope_org_path,
+    )
+    package_url = nexus_service.upload_collection_zip(validated_slug, INITIAL_COLLECTION_VERSION, zip_content)
+
+    try:
+        collection = create_collection(
+            session,
+            current_user,
+            name=validated_name,
+            slug=validated_slug,
+            description_markdown=description_markdown,
+            package_url=package_url,
+            parsed_zip=parsed_zip,
+            scope_type=resolved_scope_type,
+            group=group,
+            scope_org_level=resolved_org_level,
+            scope_org_name=resolved_org_name,
+            scope_org_path=resolved_org_path,
+        )
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Skill 集合已存在") from exc
+    snapshots = get_collection_snapshots(session, collection)
+    return ManagedCollectionDetail.model_validate(to_collection_detail(collection, snapshots))
+
+
+@router.put("/collections/{slug}", response_model=ManagedCollectionDetail)
+async def update_workspace_collection(
+    slug: str,
+    session: DbSession,
+    current_user: User = Depends(get_current_user),
+    name: str = Form(default=""),
+    description_markdown: str = Form(""),
+    scope_type: str = Form(default="PUBLIC"),
+    group_id: str = Form(default=""),
+    scope_org_level: str = Form(default=""),
+    scope_org_name: str = Form(default=""),
+    scope_org_path: str = Form(default=""),
+    zip_file: UploadFile | None = File(default=None),
+):
+    validated_slug = validate_collection_slug(slug)
+    collection = get_workspace_collection_by_slug(session, validated_slug, current_user)
+    if collection is None or collection.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 集合不存在")
+
+    next_name = validate_collection_name(name or collection.name)
+    package_url: str | None = None
+    parsed_zip = None
+    next_version: str | None = None
+    if zip_file is not None and zip_file.filename:
+        next_version = get_next_collection_version(collection.current_version)
+        zip_content, parsed_zip = await validate_collection_zip_file(zip_file)
+        package_url = nexus_service.upload_collection_zip(validated_slug, next_version, zip_content)
+
+    resolved_scope_type, group, resolved_org_level, resolved_org_name, resolved_org_path = resolve_collection_scope(
+        session,
+        current_user,
+        scope_type=scope_type,
+        group_id=_parse_group_id(group_id),
+        scope_org_level=_parse_optional_positive_int(scope_org_level, "scope_org_level"),
+        scope_org_name=scope_org_name,
+        scope_org_path=scope_org_path,
+    )
+
+    try:
+        collection = update_collection(
+            session,
+            collection,
+            name=next_name,
+            description_markdown=description_markdown,
+            package_url=package_url,
+            parsed_zip=parsed_zip,
+            version=next_version,
+            scope_type=resolved_scope_type,
+            group=group,
+            scope_org_level=resolved_org_level,
+            scope_org_name=resolved_org_name,
+            scope_org_path=resolved_org_path,
+        )
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Skill 集合版本已存在") from exc
+    snapshots = get_collection_snapshots(session, collection)
+    return ManagedCollectionDetail.model_validate(to_collection_detail(collection, snapshots))
+
+
+@router.delete("/collections/{slug}", response_model=MessageResponse)
+def delete_workspace_collection(slug: str, session: DbSession, current_user: User = Depends(get_current_user)):
+    collection = get_workspace_collection_by_slug(session, validate_collection_slug(slug), current_user)
+    if collection is None or collection.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 集合不存在")
+    soft_delete_collection(session, collection)
+    return MessageResponse(message="Skill 集合已删除")
 
 
 @router.get("/groups/member-options", response_model=list[GroupMemberSummary])

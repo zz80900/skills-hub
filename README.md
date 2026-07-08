@@ -12,7 +12,9 @@
 - 登录时优先匹配本地用户；本地不存在时可切换到 AD 域 Kerberos + LDAP 认证，并自动建普通用户
 - 普通用户登录后仅能查看和操作自己上传的 Skill，管理员可查看全部 Skill 并看到逻辑删除状态
 - 工作台支持创建 Skill、上传 ZIP、升级同名 Skill 和逻辑删除
-- 上传时校验 ZIP 根目录必须包含非空 `SKILL.md`，可选 `cmd` 只能包含单条以 `npm install` 开头的命令
+- 工作台支持上传 Skill 集合 ZIP，自动识别根目录一级 Skill 目录并生成 Skill 集合 manifest
+- Skill 集合详情提供 `npx nexgo-skills install collection <slug>` 安装命令，CLI 会按目标 Agent 目录批量安装并失败回滚
+- 上传 Skill ZIP 时校验根目录必须包含非空 `SKILL.md`，可选 `cmd` 只作为普通包内容保存
 - ZIP 上传到私有 Nexus `raw-repo/skills/{name}.zip`
 
 ## Skill ZIP 约束
@@ -22,13 +24,47 @@
 ```text
 your-skill.zip
 |- SKILL.md
-\- cmd        # 可选，仅当需要额外安装 CLI
+\- cmd        # 可选，普通文本文件
 ```
 
 - 根目录必须存在非空 `SKILL.md`
-- 如需额外安装 CLI，可在根目录提供一个名为 `cmd` 的文件
-- `cmd` 只能包含一条以 `npm install` 开头的命令
-- `cmd` 不能包含其他命令、命令拼接或多行脚本
+- `cmd` 可以存在，但服务端和 CLI 都不会解析、校验或执行它
+- 安装行为来自 `nexgo-skills` CLI 和 target adapter，不来自包内脚本
+
+## Skill 集合 ZIP 约束
+
+工作台上传 Skill 集合 ZIP 时，压缩包根目录下的每个一级目录都会被识别为一个 Skill：
+
+```text
+frontend-basic.zip
+|- frontend-design/
+|  |- SKILL.md
+|  \- references/
+|- code-review/
+|  \- SKILL.md
+\- commit-helper/
+   \- SKILL.md
+```
+
+- 根目录只能包含 Skill 目录，不能包含 `README.md`、`collection.json` 或其他普通文件
+- 每个 Skill 目录必须直接包含非空 `SKILL.md`
+- 不需要 `skills/`、`codex/`、`claude-code/` 等包裹目录
+- 服务端会根据 ZIP 内容生成内部 manifest 和每个 Skill 的规范化 checksum
+- Skill 集合版本号由系统自动管理：创建时为 `1.0.0`，上传新 ZIP 时按单个 Skill 的规则自动递增
+- Skill 集合包保存到 Nexus 专属路径：`raw-repo/skills/collections/{slug}/{version}.zip`
+
+## CLI Skill 集合安装
+
+默认安装命令：
+
+```powershell
+npx nexgo-skills install collection frontend-basic
+npx nexgo-skills install collection frontend-basic --target codex
+npx nexgo-skills install collection frontend-basic --target claude-code
+npx nexgo-skills install collection frontend-basic --dry-run --json
+```
+
+CLI 会先获取 Skill 集合 manifest，再下载 ZIP 并校验每个 Skill checksum。安装写入目标 Agent 的 Skill 目录；若任意步骤失败，会删除本次新增目录并恢复被覆盖目录。
 
 ## 目录
 

@@ -32,6 +32,7 @@ class Group(Base):
         order_by="GroupMembership.id.asc()",
     )
     skills: Mapped[list["Skill"]] = relationship(back_populates="group")
+    collections: Mapped[list["SkillCollection"]] = relationship(back_populates="group")
 
 
 class GroupMembership(Base):

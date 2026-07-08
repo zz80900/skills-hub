@@ -49,6 +49,14 @@ def make_zip(
     return buffer.getvalue()
 
 
+def make_collection_zip(entries: dict[str, str | bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path, content in entries.items():
+            archive.writestr(path, content)
+    return buffer.getvalue()
+
+
 @pytest.fixture(autouse=True)
 def reset_database():
     Base.metadata.drop_all(bind=engine)
@@ -203,6 +211,61 @@ def create_local_skill(
         "/api/workspace/skills",
         headers=headers,
         files={"zip_file": (f"{name}.zip", make_zip("# skill"), "application/zip")},
+        data=data,
+    )
+    assert response.status_code == 201
+    return response
+
+
+def create_collection_record(
+    client: TestClient,
+    monkeypatch,
+    headers: dict[str, str],
+    *,
+    name: str = "Frontend Basic",
+    slug: str = "frontend-basic",
+    description_markdown: str = "collection detail",
+    zip_entries: dict[str, str | bytes] | None = None,
+    group_id: int | None = None,
+    scope_type: str | None = None,
+    scope_org_level: int | None = None,
+    scope_org_name: str | None = None,
+    scope_org_path: str | None = None,
+):
+    def fake_upload(collection_slug: str, collection_version: str, content: bytes) -> str:
+        return nexus_service.build_collection_package_url(collection_slug, collection_version)
+
+    monkeypatch.setattr(nexus_service, "upload_collection_zip", fake_upload)
+    effective_scope_type = scope_type
+    if effective_scope_type is None and group_id is not None:
+        effective_scope_type = "GROUP"
+
+    data = {
+        "name": name,
+        "slug": slug,
+        "description_markdown": description_markdown,
+    }
+    if effective_scope_type is not None:
+        data["scope_type"] = effective_scope_type
+    if group_id is not None:
+        data["group_id"] = str(group_id)
+    if scope_org_level is not None:
+        data["scope_org_level"] = str(scope_org_level)
+    if scope_org_name is not None:
+        data["scope_org_name"] = scope_org_name
+    if scope_org_path is not None:
+        data["scope_org_path"] = scope_org_path
+
+    response = client.post(
+        "/api/workspace/collections",
+        headers=headers,
+        files={
+            "zip_file": (
+                f"{slug}.zip",
+                make_collection_zip(zip_entries or {"alpha/SKILL.md": "# alpha", "beta/SKILL.md": "# beta"}),
+                "application/zip",
+            )
+        },
         data=data,
     )
     assert response.status_code == 201
@@ -940,7 +1003,7 @@ def test_upload_accepts_valid_root_cmd(client: TestClient, monkeypatch):
     assert response.json()["name"] == "cmd-skill"
 
 
-def test_upload_rejects_cmd_without_npm_install(client: TestClient, monkeypatch):
+def test_upload_accepts_arbitrary_cmd_content(client: TestClient, monkeypatch):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
 
@@ -950,13 +1013,13 @@ def test_upload_rejects_cmd_without_npm_install(client: TestClient, monkeypatch)
         "/api/workspace/skills",
         headers=auth_headers(client),
         files={"zip_file": ("demo.zip", make_zip("# demo", extra_files={"cmd": "pnpm add demo"}), "application/zip")},
-        data={"name": "bad-cmd-skill", "description_markdown": "# demo"},
+        data={"name": "arbitrary-cmd-skill", "description_markdown": "# demo"},
     )
-    assert response.status_code == 422
-    assert response.json()["detail"] == "cmd 文件只能包含一条以 npm install 开头的命令"
+    assert response.status_code == 201
+    assert response.json()["name"] == "arbitrary-cmd-skill"
 
 
-def test_upload_rejects_chained_cmd(client: TestClient, monkeypatch):
+def test_upload_accepts_multiline_cmd_content(client: TestClient, monkeypatch):
     def fake_upload(skill_name: str, content: bytes) -> str:
         return nexus_service.build_package_url(skill_name)
 
@@ -968,14 +1031,229 @@ def test_upload_rejects_chained_cmd(client: TestClient, monkeypatch):
         files={
             "zip_file": (
                 "demo.zip",
-                make_zip("# demo", extra_files={"cmd": "npm install -g @xgd/demo-cli && echo done"}),
+                make_zip("# demo", extra_files={"cmd": "npm install -g @xgd/demo-cli\necho done"}),
                 "application/zip",
             )
         },
-        data={"name": "chain-cmd-skill", "description_markdown": "# demo"},
+        data={"name": "multiline-cmd-skill", "description_markdown": "# demo"},
     )
-    assert response.status_code == 422
-    assert response.json()["detail"] == "cmd 文件不能包含其他命令或命令拼接"
+    assert response.status_code == 201
+    assert response.json()["name"] == "multiline-cmd-skill"
+
+
+def test_collection_upload_creates_manifest_and_preview(client: TestClient, monkeypatch):
+    headers = auth_headers(client)
+    response = create_collection_record(
+        client,
+        monkeypatch,
+        headers,
+        zip_entries={
+            "frontend-design/SKILL.md": "# frontend",
+            "frontend-design/references/a.md": "A",
+            "code-review/SKILL.md": "# review",
+        },
+    )
+
+    payload = response.json()
+    assert payload["slug"] == "frontend-basic"
+    assert payload["current_version"] == "1.0.0"
+    assert payload["item_count"] == 2
+    assert payload["install_command"] == "npx nexgo-skills install collection frontend-basic"
+    assert [item["name"] for item in payload["preview_items"]] == ["code-review", "frontend-design"]
+    assert payload["manifest"]["schema_version"] == "nexgo.collection.v1"
+    assert payload["manifest"]["package_url"] == "/api/collections/frontend-basic/package?version=1.0.0"
+
+    preview_response = client.post(
+        "/api/workspace/collections/preview",
+        headers=headers,
+        files={
+            "zip_file": (
+                "preview.zip",
+                make_collection_zip({"alpha/SKILL.md": "# alpha", "beta/SKILL.md": "# beta"}),
+                "application/zip",
+            )
+        },
+    )
+    assert preview_response.status_code == 200
+    assert preview_response.json()["item_count"] == 2
+
+
+def test_collection_upgrade_auto_increments_version(client: TestClient, monkeypatch):
+    headers = auth_headers(client)
+    create_response = create_collection_record(client, monkeypatch, headers)
+    assert create_response.json()["current_version"] == "1.0.0"
+
+    uploaded_versions: list[str] = []
+
+    def fake_upload(collection_slug: str, collection_version: str, content: bytes) -> str:
+        uploaded_versions.append(collection_version)
+        return nexus_service.build_collection_package_url(collection_slug, collection_version)
+
+    monkeypatch.setattr(nexus_service, "upload_collection_zip", fake_upload)
+
+    response = client.put(
+        "/api/workspace/collections/frontend-basic",
+        headers=headers,
+        files={
+            "zip_file": (
+                "frontend-basic-next.zip",
+                make_collection_zip({"alpha/SKILL.md": "# alpha next", "gamma/SKILL.md": "# gamma"}),
+                "application/zip",
+            )
+        },
+        data={
+            "name": "Frontend Basic",
+            "description_markdown": "second version",
+            "scope_type": "PUBLIC",
+            "version": "9.9.9",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert uploaded_versions == ["1.0.1"]
+    assert payload["current_version"] == "1.0.1"
+    assert payload["manifest"]["version"] == "1.0.1"
+    assert [item["version"] for item in payload["version_history"]] == ["1.0.1", "1.0.0"]
+
+
+def test_collection_zip_validation_rejects_invalid_archives(client: TestClient, monkeypatch):
+    headers = auth_headers(client)
+
+    def fake_upload(collection_slug: str, collection_version: str, content: bytes) -> str:
+        return nexus_service.build_collection_package_url(collection_slug, collection_version)
+
+    monkeypatch.setattr(nexus_service, "upload_collection_zip", fake_upload)
+
+    cases = [
+        (
+            {"README.md": "# root", "alpha/SKILL.md": "# alpha"},
+            "Skill 集合 ZIP 根目录只能包含 Skill 目录，不能包含普通文件",
+        ),
+        (
+            {"alpha/README.md": "# alpha"},
+            "Skill 集合 ZIP 中的 Skill 目录缺少非空 SKILL.md: alpha",
+        ),
+        (
+            {"../evil/SKILL.md": "# evil"},
+            "Skill 集合 ZIP 包含不安全路径",
+        ),
+        (
+            {"Alpha/SKILL.md": "# upper", "alpha/SKILL.md": "# lower"},
+            "Skill 集合 ZIP 包含重复的 Skill 目录名称",
+        ),
+    ]
+
+    for index, (entries, detail) in enumerate(cases):
+        response = client.post(
+            "/api/workspace/collections",
+            headers=headers,
+            files={"zip_file": (f"bad-{index}.zip", make_collection_zip(entries), "application/zip")},
+            data={
+                "name": f"Bad {index}",
+                "slug": f"bad-{index}",
+                "description_markdown": "# bad",
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == detail
+
+
+def test_collection_group_visibility_protects_manifest_and_package(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    create_user_account(client, admin_headers, "charlie", "charlie-pass")
+
+    group = create_group_record(client, admin_headers, name="Skill 集合组", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+    charlie_headers = auth_headers(client, "charlie", "charlie-pass")
+    replace_group_member_list(client, alice_headers, group_id=group["id"], user_ids=[alice["id"], bob["id"]])
+
+    create_collection_record(
+        client,
+        monkeypatch,
+        alice_headers,
+        slug="team-collection",
+        name="Team Collection",
+        group_id=group["id"],
+    )
+
+    anonymous_list = client.get("/api/collections")
+    assert anonymous_list.status_code == 200
+    assert anonymous_list.json()["items"] == []
+
+    member_list = client.get("/api/collections", headers=bob_headers)
+    assert member_list.status_code == 200
+    assert [item["slug"] for item in member_list.json()["items"]] == ["team-collection"]
+
+    assert client.get("/api/collections/team-collection/manifest").status_code == 404
+    assert client.get("/api/collections/team-collection/manifest", headers=charlie_headers).status_code == 404
+
+    manifest_response = client.get("/api/collections/team-collection/manifest", headers=bob_headers)
+    assert manifest_response.status_code == 200
+    manifest_payload = manifest_response.json()
+    assert manifest_payload["slug"] == "team-collection"
+    assert manifest_payload["package_url"] == "/api/collections/team-collection/package?version=1.0.0"
+
+    anonymous_package = client.get("/api/collections/team-collection/package", follow_redirects=False)
+    assert anonymous_package.status_code == 404
+
+    member_package = client.get("/api/collections/team-collection/package", headers=bob_headers, follow_redirects=False)
+    assert member_package.status_code == 307
+    assert "team-collection/1.0.0.zip" in member_package.headers["location"]
+
+
+def test_collection_organization_visibility_allows_descendants(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    owner_headers = login_ad_user(
+        client,
+        monkeypatch,
+        "owner",
+        distinguished_name=(
+            "CN=owner,OU=公共技术中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+        ),
+    )
+    child_headers = login_ad_user(
+        client,
+        monkeypatch,
+        "child",
+        distinguished_name=(
+            "CN=child,OU=系统方案部,OU=公共技术中心,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+        ),
+    )
+    sibling_headers = login_ad_user(
+        client,
+        monkeypatch,
+        "sibling",
+        distinguished_name=(
+            "CN=sibling,OU=终端方案部,OU=技术中心,OU=支付硬件事业群,OU=新国都集团,DC=xgd,DC=com"
+        ),
+    )
+
+    create_collection_record(
+        client,
+        monkeypatch,
+        admin_headers,
+        slug="org-collection",
+        name="Org Collection",
+        scope_type="ORGANIZATION",
+        scope_org_level=3,
+        scope_org_name="公共技术中心",
+        scope_org_path="支付硬件事业群 / 技术中心 / 公共技术中心",
+    )
+
+    owner_list = client.get("/api/collections", headers=owner_headers)
+    assert owner_list.status_code == 200
+    assert [item["slug"] for item in owner_list.json()["items"]] == ["org-collection"]
+
+    child_detail = client.get("/api/collections/org-collection", headers=child_headers)
+    assert child_detail.status_code == 200
+    assert child_detail.json()["slug"] == "org-collection"
+
+    sibling_detail = client.get("/api/collections/org-collection", headers=sibling_headers)
+    assert sibling_detail.status_code == 404
 
 
 def test_workspace_user_skill_isolation(client: TestClient, monkeypatch):
@@ -2158,11 +2436,16 @@ def test_public_remote_failure_does_not_break_local_results(client: TestClient, 
     assert payload["remote_error"] == "skills.sh 数据暂时不可用，请稍后重试。"
 
 
-def test_public_config_returns_cli_install_command(client: TestClient):
-    response = client.get("/api/public-config")
-    assert response.status_code == 200
-    command = response.json()["cli_install_command"]
-    assert command == "npx nexgo-skills --help"
+def test_public_config_returns_cli_install_command(client: TestClient, monkeypatch):
+    monkeypatch.setenv("CLI_INSTALL_COMMAND", "npx nexgo-skills --help")
+    get_settings.cache_clear()
+    try:
+        response = client.get("/api/public-config")
+        assert response.status_code == 200
+        command = response.json()["cli_install_command"]
+        assert command == "npx nexgo-skills --help"
+    finally:
+        get_settings.cache_clear()
 
 
 def test_skill_install_command_template_configures_local_and_remote(monkeypatch):

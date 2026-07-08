@@ -27,7 +27,7 @@ The system SHALL merge CLI installation guidance into the guide entry and SHALL 
 - **THEN** the system MUST NOT show a standalone CLI installation menu item
 
 ### Requirement: User center provides permission-aware switching between private modules
-The system SHALL present private management pages inside user center, SHALL expose only the module switches that the current user is authorized to access, and SHALL display the current authenticated user's normalized organization hierarchy inside the user center profile area. Administrators MUST see Skill management, group management, and user management. Non-administrators MUST see group management whenever they are a leader of at least one group or a member of at least one group, and that access SHALL remain read-only for users who are members but not managers of the selected group.
+The system SHALL present private management pages inside user center, SHALL expose only the module switches that the current user is authorized to access, and SHALL display the current authenticated user's normalized organization hierarchy inside the user center profile area. Administrators MUST see Skill management, group management, and user management. Non-administrators MUST see group management whenever they are a leader of at least one group or a member of at least one group, and that access SHALL remain read-only for users who are members but not managers of the selected group. The system MUST keep module switches, list loading states, empty states, and recoverable errors consistent across the private modules.
 
 #### Scenario: Administrator sees all management switches
 - **WHEN** an administrator enters user center
@@ -44,3 +44,11 @@ The system SHALL present private management pages inside user center, SHALL expo
 #### Scenario: AD user sees normalized organization hierarchy in user center
 - **WHEN** an AD user enters user center after a successful login
 - **THEN** the system MUST display the user's available organization hierarchy levels in order and MUST omit or visually mark missing lower levels when the hierarchy has fewer than 4 levels
+
+#### Scenario: Private module list is loading
+- **WHEN** a user enters Skill management, group management, or user management and the relevant list data is still loading
+- **THEN** the system MUST show a consistent private-module loading state without exposing stale error messages from another module
+
+#### Scenario: Private module list fails to load
+- **WHEN** a private module list fails to load because of a recoverable network or server error
+- **THEN** the system MUST show an inline error state with a retry path while keeping the user inside user center

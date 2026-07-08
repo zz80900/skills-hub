@@ -137,6 +137,23 @@ export function getSkillScopeLabel(skill) {
   return '公开'
 }
 
+export function getCollectionScopeLabel(collection) {
+  if (!collection) {
+    return '公开'
+  }
+  if (normalizeOptionalText(collection.scope_label)) {
+    return collection.scope_label.trim()
+  }
+  const scopeType = normalizeScopeType(collection.scope_type, collection.group_id)
+  if (scopeType === 'GROUP') {
+    return `组内 · ${collection.group_name || collection.group_id || '-'}`
+  }
+  if (scopeType === 'ORGANIZATION') {
+    return `部门内 · ${collection.scope_org_path || collection.scope_org_name || '-'}`
+  }
+  return '公开'
+}
+
 function normalizeOrganizationOption(option) {
   if (!option || typeof option !== 'object') {
     return option
@@ -169,6 +186,34 @@ function normalizeSkillPayload(payload) {
     normalized.version_history = payload.version_history.map((item) => ({
       ...item,
       contributor: normalizeContributor(item?.contributor) || null,
+    }))
+  }
+
+  return normalized
+}
+
+function normalizeCollectionPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return payload
+  }
+
+  const normalized = {
+    ...payload,
+    contributor: normalizeContributor(payload.contributor) || null,
+    scope_type: normalizeScopeType(payload.scope_type, payload.group_id),
+    scope_label: getCollectionScopeLabel(payload),
+    scope_org_name: normalizeOptionalText(payload.scope_org_name),
+    scope_org_path: normalizeOptionalText(payload.scope_org_path),
+    item_count: Number(payload.item_count) || 0,
+    preview_items: Array.isArray(payload.preview_items) ? payload.preview_items : [],
+  }
+  normalized.scope_org_level = payload.scope_org_level == null ? null : Number(payload.scope_org_level) || null
+
+  if (Array.isArray(payload.version_history)) {
+    normalized.version_history = payload.version_history.map((item) => ({
+      ...item,
+      contributor: normalizeContributor(item?.contributor) || null,
+      item_count: Number(item?.item_count) || 0,
     }))
   }
 
@@ -357,6 +402,24 @@ export async function fetchRemoteSkills(query, options = {}) {
   }
 }
 
+export async function fetchCollections(query) {
+  const payload = await request(buildUrl('/api/collections', { q: query }), {
+    authMode: AUTH_MODE_OPTIONAL,
+  })
+  return {
+    ...payload,
+    items: (payload.items || []).map(normalizeCollectionPayload),
+  }
+}
+
+export async function fetchCollection(slug) {
+  return normalizeCollectionPayload(
+    await request(buildUrl(`/api/collections/${encodeURIComponent(slug)}`), {
+      authMode: AUTH_MODE_OPTIONAL,
+    }),
+  )
+}
+
 export async function fetchSkill(source, slug) {
   return normalizeSkillPayload(
     await request(buildUrl(`/api/skills/${source}/${slug}`), {
@@ -397,6 +460,53 @@ export async function fetchWorkspaceSkill(name) {
   return normalizeSkillPayload(
     await request(buildUrl(`/api/workspace/skills/${encodeURIComponent(name)}`), { authMode: AUTH_MODE_REQUIRED }),
   )
+}
+
+export async function fetchWorkspaceCollections(query) {
+  return (
+    await request(buildUrl('/api/workspace/collections', { q: query }), { authMode: AUTH_MODE_REQUIRED })
+  ).map(normalizeCollectionPayload)
+}
+
+export async function fetchWorkspaceCollection(slug) {
+  return normalizeCollectionPayload(
+    await request(buildUrl(`/api/workspace/collections/${encodeURIComponent(slug)}`), { authMode: AUTH_MODE_REQUIRED }),
+  )
+}
+
+export async function previewCollectionZip(formData) {
+  return await request(buildUrl('/api/workspace/collections/preview'), {
+    method: 'POST',
+    authMode: AUTH_MODE_REQUIRED,
+    body: formData,
+  })
+}
+
+export async function createCollection(formData) {
+  return normalizeCollectionPayload(
+    await request(buildUrl('/api/workspace/collections'), {
+      method: 'POST',
+      authMode: AUTH_MODE_REQUIRED,
+      body: formData,
+    }),
+  )
+}
+
+export async function updateCollection(slug, formData) {
+  return normalizeCollectionPayload(
+    await request(buildUrl(`/api/workspace/collections/${encodeURIComponent(slug)}`), {
+      method: 'PUT',
+      authMode: AUTH_MODE_REQUIRED,
+      body: formData,
+    }),
+  )
+}
+
+export function deleteCollection(slug) {
+  return request(buildUrl(`/api/workspace/collections/${encodeURIComponent(slug)}`), {
+    method: 'DELETE',
+    authMode: AUTH_MODE_REQUIRED,
+  })
 }
 
 export async function createSkill(formData) {

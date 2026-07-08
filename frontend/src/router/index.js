@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { getWorkspaceRoute, isAdmin, isAuthenticated } from '../services/api'
+import CollectionDetailView from '../views/admin/CollectionDetailView.vue'
+import CollectionFormView from '../views/admin/CollectionFormView.vue'
 import DashboardView from '../views/admin/DashboardView.vue'
 import LoginView from '../views/admin/LoginView.vue'
 import SkillDetailView from '../views/admin/SkillDetailView.vue'
@@ -39,6 +41,31 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/workspace/collections/new',
+      name: 'workspace-collection-create',
+      component: CollectionFormView,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/workspace/collections/:slug/edit',
+      name: 'workspace-collection-edit',
+      component: CollectionFormView,
+      props: true,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/workspace/collections/:slug',
+      name: 'workspace-collection-detail',
+      component: CollectionDetailView,
+      props: true,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/workspace/collections',
+      name: 'workspace-collections',
+      redirect: { name: 'workspace-dashboard', query: { tab: 'collections' } },
+    },
+    {
       path: '/workspace/groups',
       name: 'workspace-groups',
       redirect: { name: 'workspace-dashboard', query: { tab: 'groups' } },
@@ -55,6 +82,10 @@ const router = createRouter({
     { path: '/admin/skills/new', redirect: '/workspace/skills/new' },
     { path: '/admin/skills/:name/edit', redirect: (to) => `/workspace/skills/${to.params.name}/edit` },
     { path: '/admin/skills/:name', redirect: (to) => `/workspace/skills/${to.params.name}` },
+    { path: '/admin/collections/new', redirect: '/workspace/collections/new' },
+    { path: '/admin/collections/:slug/edit', redirect: (to) => `/workspace/collections/${to.params.slug}/edit` },
+    { path: '/admin/collections/:slug', redirect: (to) => `/workspace/collections/${to.params.slug}` },
+    { path: '/admin/collections', redirect: '/workspace/collections' },
   ],
   scrollBehavior() {
     return { top: 0 }

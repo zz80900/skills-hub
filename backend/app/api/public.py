@@ -1,9 +1,16 @@
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 
 from app.api.deps import DbSession, get_optional_current_user
 from app.core.config import get_settings
 from app.models.user import User
+from app.schemas.collection import (
+    CollectionManifestResponse,
+    PublicCollectionDetail,
+    PublicCollectionListResponse,
+    PublicCollectionSummary,
+)
 from app.schemas.skill import (
     LocalSkillListResponse,
     PublicConfigResponse,
@@ -11,6 +18,17 @@ from app.schemas.skill import (
     PublicSkillSummary,
     RemoteSkillListResponse,
     SkillListResponse,
+)
+from app.services.collection_service import (
+    get_collection_snapshot,
+    get_collection_snapshots,
+    get_public_collection_by_slug,
+    manifest_for_response,
+    search_public_collections,
+    to_public_collection_detail,
+    to_public_collection_summary,
+    validate_collection_slug,
+    validate_collection_version,
 )
 from app.services.skill_service import (
     PUBLIC_SOURCE_LOCAL,
@@ -84,6 +102,75 @@ async def list_local_skills(
     q: str | None = Query(default=None, description="搜索关键词"),
 ):
     return LocalSkillListResponse(items=_list_local_skill_summaries(session, q, current_user))
+
+
+@router.get("/collections", response_model=PublicCollectionListResponse)
+async def list_collections(
+    session: DbSession,
+    current_user: User | None = Depends(get_optional_current_user),
+    q: str | None = Query(default=None, description="搜索关键词"),
+):
+    return PublicCollectionListResponse(
+        items=[
+            PublicCollectionSummary.model_validate(to_public_collection_summary(collection))
+            for collection in search_public_collections(session, q, current_user)
+        ]
+    )
+
+
+@router.get("/collections/{slug}/manifest", response_model=CollectionManifestResponse)
+async def get_collection_manifest(
+    slug: str,
+    session: DbSession,
+    current_user: User | None = Depends(get_optional_current_user),
+    version: str | None = Query(default=None, description="Skill 集合版本"),
+):
+    collection = get_public_collection_by_slug(session, validate_collection_slug(slug), current_user)
+    if collection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 集合不存在")
+
+    manifest = collection.manifest_json
+    if version:
+        validated_version = validate_collection_version(version)
+        snapshot = get_collection_snapshot(session, collection, validated_version)
+        if snapshot is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 集合版本不存在")
+        manifest = snapshot.manifest_json
+    return CollectionManifestResponse.model_validate(manifest_for_response(collection, manifest))
+
+
+@router.get("/collections/{slug}/package")
+async def download_collection_package(
+    slug: str,
+    session: DbSession,
+    current_user: User | None = Depends(get_optional_current_user),
+    version: str | None = Query(default=None, description="Skill 集合版本"),
+):
+    collection = get_public_collection_by_slug(session, validate_collection_slug(slug), current_user)
+    if collection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 集合不存在")
+
+    package_url = collection.package_url
+    if version:
+        validated_version = validate_collection_version(version)
+        snapshot = get_collection_snapshot(session, collection, validated_version)
+        if snapshot is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 集合版本不存在")
+        package_url = snapshot.package_url
+    return RedirectResponse(package_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+
+@router.get("/collections/{slug}", response_model=PublicCollectionDetail)
+async def get_collection(
+    slug: str,
+    session: DbSession,
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    collection = get_public_collection_by_slug(session, validate_collection_slug(slug), current_user)
+    if collection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 集合不存在")
+    snapshots = get_collection_snapshots(session, collection)
+    return PublicCollectionDetail.model_validate(to_public_collection_detail(collection, snapshots))
 
 
 @router.get("/skills/skills_sh", response_model=RemoteSkillListResponse)

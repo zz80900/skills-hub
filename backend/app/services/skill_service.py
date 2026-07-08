@@ -17,11 +17,11 @@ from app.models.skill import (
     SkillVersion,
 )
 from app.models.user import User
-from app.services.group_service import resolve_group_for_skill_binding
 from app.services.install_command import build_skill_install_command
 from app.services.markdown import render_markdown
 from app.services.nexus import build_package_url
 from app.services.user_service import ROLE_ADMIN
+from app.services import visibility as visibility_service
 
 
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -32,12 +32,8 @@ PUBLIC_SOURCE_LOCAL = "local"
 PUBLIC_SOURCE_LOCAL_LABEL = "本地库"
 UNSET = object()
 ZIP_ROOT_SKILL_MD = "SKILL.md"
-ZIP_ROOT_CMD = "cmd"
 ZIP_ROOT_SKILL_MD_REQUIRED_DETAIL = "ZIP 压缩包根目录必须包含 SKILL.md"
 ZIP_SKILL_MD_BLANK_DETAIL = "SKILL.md 不能为空白文件"
-ZIP_CMD_PREFIX_DETAIL = "cmd 文件只能包含一条以 npm install 开头的命令"
-ZIP_CMD_CHAIN_DETAIL = "cmd 文件不能包含其他命令或命令拼接"
-ZIP_CMD_PATTERN = re.compile(r"^npm install(?:\s+.+)?$")
 SKILL_NAME_SPACE_DETAIL = "Skill 名称不能包含空格"
 SKILL_NAME_PATTERN_DETAIL = "Skill 名称只允许小写字母、数字和中划线"
 SKILL_SCOPE_OPTIONS = {SKILL_SCOPE_PUBLIC, SKILL_SCOPE_GROUP, SKILL_SCOPE_ORGANIZATION}
@@ -98,22 +94,6 @@ def _validate_skill_md_entry(archive: zipfile.ZipFile, root_files: dict[str, zip
         _raise_zip_validation_error(ZIP_SKILL_MD_BLANK_DETAIL)
 
 
-def _validate_cmd_entry(archive: zipfile.ZipFile, root_files: dict[str, zipfile.ZipInfo]) -> None:
-    cmd_info = root_files.get(ZIP_ROOT_CMD)
-    if cmd_info is None:
-        return
-
-    cmd_content = _read_archive_text(archive, cmd_info).strip()
-    if not cmd_content or len(cmd_content.splitlines()) != 1:
-        _raise_zip_validation_error(ZIP_CMD_PREFIX_DETAIL)
-
-    if any(token in cmd_content for token in ("&&", "||", ";", "|")):
-        _raise_zip_validation_error(ZIP_CMD_CHAIN_DETAIL)
-
-    if not ZIP_CMD_PATTERN.fullmatch(cmd_content):
-        _raise_zip_validation_error(ZIP_CMD_PREFIX_DETAIL)
-
-
 async def validate_zip_file(upload_file: UploadFile) -> bytes:
     filename = upload_file.filename or ""
     if not filename.lower().endswith(".zip"):
@@ -133,7 +113,6 @@ async def validate_zip_file(upload_file: UploadFile) -> bytes:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             root_files = _get_root_archive_files(archive)
             _validate_skill_md_entry(archive, root_files)
-            _validate_cmd_entry(archive, root_files)
     except zipfile.BadZipFile as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -187,29 +166,7 @@ def _apply_skill_query_filters(statement, query: str | None):
 
 
 def _apply_public_skill_visibility_filter(statement, actor: User | None):
-    if actor is None:
-        return statement.where(Skill.scope_type == SKILL_SCOPE_PUBLIC)
-    if actor.role.name == ROLE_ADMIN:
-        return statement
-
-    membership_exists = (
-        select(GroupMembership.id)
-        .where(
-            GroupMembership.group_id == Skill.group_id,
-            GroupMembership.user_id == actor.id,
-        )
-        .exists()
-    )
-    org_paths = actor_organization_paths(actor)
-    org_conditions = [Skill.scope_type == SKILL_SCOPE_PUBLIC]
-    org_conditions.append((Skill.scope_type == SKILL_SCOPE_GROUP) & membership_exists)
-    if org_paths:
-        for path in org_paths:
-            org_conditions.append(
-                (Skill.scope_type == SKILL_SCOPE_ORGANIZATION)
-                & (Skill.scope_org_path == path)
-            )
-    return statement.where(or_(*org_conditions))
+    return visibility_service.apply_public_visibility_filter(statement, Skill, actor)
 
 
 def search_public_skills(session: Session, query: str | None = None, actor: User | None = None) -> list[Skill]:
@@ -487,96 +444,44 @@ def default_package_url(skill_name: str) -> str:
 
 
 def resolve_skill_group(session: Session, actor: User, group_id: int | None) -> Group | None:
-    return resolve_group_for_skill_binding(session, actor, group_id)
+    return visibility_service.resolve_visibility_scope(
+        session,
+        actor,
+        scope_type=SKILL_SCOPE_GROUP,
+        group_id=group_id,
+        scope_org_level=None,
+        scope_org_name=None,
+        scope_org_path=None,
+        entity_label="Skill",
+    )[1]
 
 
 def normalize_scope_type(scope_type: str | None) -> str:
-    normalized = (scope_type or SKILL_SCOPE_PUBLIC).strip().upper()
-    if normalized not in SKILL_SCOPE_OPTIONS:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="scope_type 非法")
-    return normalized
+    return visibility_service.normalize_scope_type(scope_type)
 
 
 def normalize_org_scope_payload(scope_org_level: int | None, scope_org_name: str | None, scope_org_path: str | None) -> tuple[int | None, str | None, str | None]:
-    normalized_name = normalize_optional_text(scope_org_name)
-    normalized_path = normalize_optional_text(scope_org_path)
-    if scope_org_level is None and normalized_name is None and normalized_path is None:
-        return None, None, None
-    if scope_org_level is None or scope_org_level < 1 or scope_org_level > 4:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="scope_org_level 必须在 1 到 4 之间")
-    if not normalized_name or not normalized_path:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="组织范围参数不完整")
-    return int(scope_org_level), normalized_name, normalized_path
+    return visibility_service.normalize_org_scope_payload(scope_org_level, scope_org_name, scope_org_path)
 
 
 def normalize_optional_text(value: str | None) -> str | None:
-    normalized = (value or "").strip()
-    return normalized or None
+    return visibility_service.normalize_optional_text(value)
 
 
 def actor_organization_levels(actor: User) -> list[str]:
-    return [
-        level
-        for level in (actor.org_level_1, actor.org_level_2, actor.org_level_3, actor.org_level_4)
-        if (level or "").strip()
-    ]
+    return visibility_service.actor_organization_levels(actor)
 
 
 def actor_organization_paths(actor: User) -> list[str]:
-    levels = actor_organization_levels(actor)
-    paths: list[str] = []
-    for index in range(1, len(levels) + 1):
-        paths.append(" / ".join(levels[:index]))
-    return paths
+    return visibility_service.actor_organization_paths(actor)
 
 
 def build_scope_label(skill: Skill) -> str:
-    if skill.scope_type == SKILL_SCOPE_GROUP:
-        return f"组内 · {skill.group.name if skill.group is not None else (skill.group_id or '-')}"
-    if skill.scope_type == SKILL_SCOPE_ORGANIZATION:
-        return f"部门内 · {skill.scope_org_path or skill.scope_org_name or '-'}"
-    return "公开"
+    return visibility_service.build_scope_label(skill)
 
 
 def list_organization_scope_options(session: Session, actor: User) -> list[dict[str, Any]]:
-    if actor.role.name == ROLE_ADMIN:
-        rows = (
-            session.query(
-                User.org_level_1,
-                User.org_level_2,
-                User.org_level_3,
-                User.org_level_4,
-            )
-            .filter(User.source == "AD")
-            .all()
-        )
-        options: dict[tuple[int, str], dict[str, Any]] = {}
-        for row in rows:
-            levels = [item for item in row if (item or "").strip()]
-            for index in range(1, len(levels) + 1):
-                path = " / ".join(levels[:index])
-                key = (index, path)
-                if key in options:
-                    continue
-                options[key] = {
-                    "level": index,
-                    "name": levels[index - 1],
-                    "path": path,
-                    "is_leaf": index == len(levels),
-                }
-        return [options[key] for key in sorted(options, key=lambda item: (item[0], item[1]))]
-
-    levels = actor_organization_levels(actor)
-    if not levels:
-        return []
-    return [
-        {
-            "level": len(levels),
-            "name": levels[-1],
-            "path": " / ".join(levels),
-            "is_leaf": True,
-        }
-    ]
+    return visibility_service.list_organization_scope_options(session, actor)
 
 
 def resolve_skill_scope(
@@ -589,34 +494,13 @@ def resolve_skill_scope(
     scope_org_name: str | None,
     scope_org_path: str | None,
 ) -> tuple[str, Group | None, int | None, str | None, str | None]:
-    normalized_scope_type = normalize_scope_type(scope_type)
-    if normalized_scope_type == SKILL_SCOPE_PUBLIC:
-        return normalized_scope_type, None, None, None, None
-    if normalized_scope_type == SKILL_SCOPE_GROUP:
-        group = resolve_group_for_skill_binding(session, actor, group_id)
-        if group is None:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="组范围必须选择归属组")
-        return normalized_scope_type, group, None, None, None
-
-    normalized_level, normalized_name, normalized_path = normalize_org_scope_payload(
-        scope_org_level,
-        scope_org_name,
-        scope_org_path,
+    return visibility_service.resolve_visibility_scope(
+        session,
+        actor,
+        scope_type=scope_type,
+        group_id=group_id,
+        scope_org_level=scope_org_level,
+        scope_org_name=scope_org_name,
+        scope_org_path=scope_org_path,
+        entity_label="Skill",
     )
-    assert normalized_level is not None
-    assert normalized_name is not None
-    assert normalized_path is not None
-
-    valid_options = list_organization_scope_options(session, actor)
-    matched = next(
-        (
-            option for option in valid_options
-            if option["level"] == normalized_level and option["name"] == normalized_name and option["path"] == normalized_path
-        ),
-        None,
-    )
-    if matched is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权将 Skill 绑定到该组织范围")
-    if actor.role.name != ROLE_ADMIN and not matched["is_leaf"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="普通用户只能绑定当前末级组织")
-    return normalized_scope_type, None, normalized_level, normalized_name, normalized_path

@@ -43,6 +43,8 @@ def ensure_schema_compatibility(engine: Engine) -> None:
     Base.metadata.tables["groups"].create(bind=engine, checkfirst=True)
     Base.metadata.tables["group_memberships"].create(bind=engine, checkfirst=True)
     Base.metadata.tables["skill_versions"].create(bind=engine, checkfirst=True)
+    Base.metadata.tables["skill_collections"].create(bind=engine, checkfirst=True)
+    Base.metadata.tables["skill_collection_snapshots"].create(bind=engine, checkfirst=True)
     inspector = inspect(engine)
     _ensure_user_columns(engine, inspector)
     _backfill_user_sources(engine)
