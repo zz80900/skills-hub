@@ -43,6 +43,62 @@ const form = reactive({
 const selectedOrganization = computed(() =>
   organizationOptions.value.find((item) => item.path === form.scope_org_path) || null,
 )
+const selectedScopeOption = computed(() =>
+  scopeOptions.find((option) => option.value === form.scope_type) || scopeOptions[0],
+)
+const selectedScopeHelp = computed(() => {
+  if (form.scope_type === 'GROUP') {
+    return '仅所选组成员和管理员可见。'
+  }
+  if (form.scope_type === 'ORGANIZATION') {
+    return '所选组织及子组织成员可见。'
+  }
+  return '所有已登录用户均可发现。'
+})
+const isNameReady = computed(() => {
+  const normalizedName = form.name.trim()
+  return Boolean(normalizedName && skillNamePattern.test(normalizedName))
+})
+const isScopeReady = computed(() => {
+  if (form.scope_type === 'GROUP') {
+    return Boolean(form.group_id)
+  }
+  if (form.scope_type === 'ORGANIZATION') {
+    return Boolean(form.scope_org_path)
+  }
+  return true
+})
+const formChecklist = computed(() => [
+  {
+    key: 'package',
+    label: isEditMode.value ? '升级包可选' : 'ZIP 包',
+    done: isEditMode.value || Boolean(form.zip_file),
+  },
+  {
+    key: 'identity',
+    label: '名称合法',
+    done: isNameReady.value,
+  },
+  {
+    key: 'scope',
+    label: selectedScopeOption.value.label,
+    done: isScopeReady.value,
+  },
+  {
+    key: 'description',
+    label: '描述已填写',
+    done: Boolean(form.description_markdown.trim()),
+  },
+])
+const submitHint = computed(() => {
+  if (submitting.value) {
+    return '正在提交，请保持页面打开。'
+  }
+  if (isEditMode.value) {
+    return form.zip_file ? '保存后会生成新版本。' : '未选择 ZIP 时只更新描述和范围。'
+  }
+  return '创建成功后会进入 Skill 详情页。'
+})
 
 function onFileChange(event) {
   const [file] = event.target.files || []
@@ -247,174 +303,196 @@ watch(
 <template>
   <div class="page-shell">
     <SiteHeader />
-    <main class="page-content page-content--narrow">
-      <section class="admin-panel">
-        <div class="admin-panel__heading">
-          <p class="eyebrow">{{ isAdmin ? '工作台' : '我的 Skill' }}</p>
-          <h1>{{ isEditMode ? '编辑 / 升级 Skill' : '新增 Skill' }}</h1>
-          <p>上传时只支持 ZIP；请在上传字段旁查看压缩包根目录格式要求。</p>
-          <p v-if="isEditMode && currentVersion" class="admin-panel__version">
-            当前版本：<span class="version-chip">{{ currentVersion }}</span>
-            保存后将自动升级到下一个版本。
+    <main class="page-content page-content--skill-form">
+      <section class="skill-form-shell">
+        <aside class="skill-form-rail">
+          <div class="skill-form-rail__heading">
+            <h1>{{ isEditMode ? '编辑 Skill' : '新增 Skill' }}</h1>
+            <span>{{ isAdmin ? '工作台' : '我的 Skill' }}</span>
+          </div>
+
+          <ol class="submission-checklist" aria-label="提交检查">
+            <li
+              v-for="item in formChecklist"
+              :key="item.key"
+              :class="{ 'is-done': item.done }"
+            >
+              <span aria-hidden="true">{{ item.done ? '✓' : '·' }}</span>
+              <strong>{{ item.label }}</strong>
+            </li>
+          </ol>
+
+          <p v-if="isEditMode && currentVersion" class="skill-form-rail__version">
+            当前版本 <span class="version-chip">{{ currentVersion }}</span>
           </p>
-        </div>
+        </aside>
 
-        <section v-if="loading" class="feedback">正在加载 Skill...</section>
+        <section class="skill-form-main">
+          <section v-if="loading" class="feedback">正在加载 Skill...</section>
 
-        <form v-else class="form-card" @submit.prevent="handleSubmit">
-          <label class="field">
-            <span>Skill 名称</span>
-            <input
-              v-model="form.name"
-              class="text-input"
-              type="text"
-              :disabled="isEditMode"
-              placeholder="例如：plm-assistant"
-            />
-          </label>
+          <form v-else class="skill-form" @submit.prevent="handleSubmit">
+            <section class="form-section">
+              <div class="section-heading section-heading--inline">
+                <div>
+                  <h2>{{ isEditMode ? '升级包' : 'ZIP 包' }}</h2>
+                  <p>根目录需包含非空 <code>SKILL.md</code>。</p>
+                </div>
+                <button
+                  class="button button--ghost button--compact"
+                  type="button"
+                  :aria-expanded="showZipGuidance ? 'true' : 'false'"
+                  aria-controls="zip-package-guidance"
+                  @click="toggleZipGuidance"
+                >
+                  {{ showZipGuidance ? '收起' : '格式' }}
+                </button>
+              </div>
 
-          <label v-if="isEditMode" class="field">
-            <span>上传者</span>
-            <input
-              v-model="form.contributor"
-              class="text-input"
-              type="text"
-              disabled
-            />
-          </label>
-
-          <label class="field">
-            <span>Skill 描述（Markdown）</span>
-            <textarea
-              v-model="form.description_markdown"
-              class="text-area"
-              rows="12"
-              placeholder="请输入 Skill 描述，支持 Markdown"
-            />
-          </label>
-
-          <div class="field">
-            <span>可见范围</span>
-            <div class="scope-picker" role="radiogroup" aria-label="可见范围">
-              <button
-                v-for="option in scopeOptions"
-                :key="option.value"
-                type="button"
-                class="scope-tag"
-                :class="{ 'scope-tag--active': form.scope_type === option.value }"
-                :aria-checked="form.scope_type === option.value ? 'true' : 'false'"
-                role="radio"
-                @click="selectScopeType(option.value)"
-              >
-                {{ option.label }}
-              </button>
-            </div>
-            <small class="field__hint">
-              {{
-                form.scope_type === 'GROUP'
-                  ? '绑定组后，仅该组成员和管理员可在首页查看。'
-                  : form.scope_type === 'ORGANIZATION'
-                    ? '绑定组织后，该组织及其子组织成员和管理员可在首页查看。'
-                    : '不绑定范围时，Skill 会继续公开展示。'
-              }}
-            </small>
-          </div>
-
-          <div v-if="form.scope_type === 'GROUP'" class="field">
-            <span>归属组</span>
-            <div v-if="groupOptions.length" class="scope-option-list" aria-label="归属组">
-              <button
-                v-for="group in groupOptions"
-                :key="group.id"
-                type="button"
-                class="scope-option-tag"
-                :class="{ 'scope-option-tag--active': form.group_id === String(group.id) }"
-                :disabled="groupOptionsLoading"
-                @click="selectGroup(group)"
-              >
-                {{ group.name }}
-              </button>
-            </div>
-            <small v-if="groupOptionsLoading">正在加载可选组...</small>
-            <small v-else-if="groupOptionsError" class="feedback feedback--error feedback--inline">{{ groupOptionsError }}</small>
-            <small v-else-if="!groupOptions.length">当前没有可选组。</small>
-          </div>
-
-          <div v-if="form.scope_type === 'ORGANIZATION'" class="field">
-            <span>归属组织</span>
-            <div v-if="organizationOptions.length" class="scope-option-list" aria-label="归属组织">
-              <button
-                v-for="option in organizationOptions"
-                :key="option.path"
-                type="button"
-                class="scope-option-tag"
-                :class="{ 'scope-option-tag--active': form.scope_org_path === option.path }"
-                :disabled="organizationOptionsLoading"
-                @click="selectOrganization(option)"
-              >
-                {{ option.path }}{{ option.is_leaf ? '' : '（上级组织）' }}
-              </button>
-            </div>
-            <small v-if="selectedOrganization">
-              当前选择：{{ selectedOrganization.level }} 级组织 · {{ selectedOrganization.name }}
-            </small>
-            <small v-if="organizationOptionsLoading">正在加载可选组织...</small>
-            <small v-else-if="organizationOptionsError" class="feedback feedback--error feedback--inline">{{ organizationOptionsError }}</small>
-            <small v-else-if="!organizationOptions.length">当前没有可选组织，可能该账号尚未同步 AD 组织架构。</small>
-          </div>
-
-          <div class="field">
-            <div class="field__label field__label--with-action">
-              <label class="field__label-text" for="skill-zip-file">
-                {{ isEditMode ? '升级 ZIP 包（可选）' : 'ZIP 包（必传）' }}
-              </label>
-              <button
-                class="field-help__button"
-                type="button"
-                :aria-expanded="showZipGuidance ? 'true' : 'false'"
-                aria-controls="zip-package-guidance"
-                @click="toggleZipGuidance"
-              >
-                <span class="field-help__icon" aria-hidden="true">i</span>
-                <span>格式说明</span>
-              </button>
-            </div>
-
-            <p class="field__hint">根目录必须包含非空 <code>SKILL.md</code>。</p>
-
-            <section v-if="showZipGuidance" id="zip-package-guidance" class="zip-guidance" role="note">
-              <p class="zip-guidance__title">推荐压缩包根目录</p>
-              <pre class="zip-guidance__tree"><code>your-skill.zip
+              <section v-if="showZipGuidance" id="zip-package-guidance" class="zip-guidance" role="note">
+                <p class="zip-guidance__title">推荐压缩包根目录</p>
+                <pre class="zip-guidance__tree"><code>your-skill.zip
 |- SKILL.md</code></pre>
-              <ul class="zip-guidance__list">
-                <li>根目录必须存在非空 <code>SKILL.md</code>。</li>
-              </ul>
+                <ul class="zip-guidance__list">
+                  <li>不要把 <code>SKILL.md</code> 放在二级目录。</li>
+                </ul>
+              </section>
+
+              <label class="upload-dropzone upload-dropzone--large" for="skill-zip-file">
+                <input id="skill-zip-file" class="upload-dropzone__input" type="file" accept=".zip" @change="onFileChange" />
+                <span class="upload-dropzone__title">
+                  {{ selectedFileName || (isEditMode ? '选择新版本包' : '选择 ZIP 包') }}
+                </span>
+                <span class="upload-dropzone__hint">
+                  {{ selectedFileName ? '提交时会上传处理。' : isEditMode ? '不选择则沿用当前版本。' : '支持 .zip 文件。' }}
+                </span>
+              </label>
+              <small v-if="fileError" class="feedback feedback--error feedback--inline">{{ fileError }}</small>
             </section>
 
-            <label class="upload-dropzone" for="skill-zip-file">
-              <input id="skill-zip-file" class="upload-dropzone__input" type="file" accept=".zip" @change="onFileChange" />
-              <span class="upload-dropzone__title">
-                {{ selectedFileName || (isEditMode ? '选择升级 ZIP 包' : '选择 Skill ZIP 包') }}
-              </span>
-              <span class="upload-dropzone__hint">
-                {{ selectedFileName ? '已选择文件，提交后会上传处理。' : '点击选择 .zip 文件。' }}
-              </span>
-            </label>
-            <small v-if="fileError" class="feedback feedback--error feedback--inline">{{ fileError }}</small>
-            <small v-else-if="isEditMode">不上传 ZIP 时，将沿用上一版本的安装包。</small>
-          </div>
+            <section class="form-section">
+              <div class="section-heading">
+                <h2>基本信息</h2>
+              </div>
+              <div class="form-grid">
+                <label class="field">
+                  <span>Skill 名称</span>
+                  <input
+                    v-model="form.name"
+                    class="text-input"
+                    type="text"
+                    :disabled="isEditMode"
+                    placeholder="例如：plm-assistant"
+                  />
+                  <small class="field__hint">仅小写字母、数字和中划线。</small>
+                </label>
 
-          <p v-if="error" class="feedback feedback--error">{{ error }}</p>
+                <label v-if="isEditMode" class="field">
+                  <span>上传者</span>
+                  <input
+                    v-model="form.contributor"
+                    class="text-input"
+                    type="text"
+                    disabled
+                  />
+                </label>
+              </div>
+            </section>
 
-          <div class="form-actions">
-            <button class="button" :disabled="submitting" type="submit">
-              {{ submitting ? '提交中...' : isEditMode ? '保存并升级' : '创建 Skill' }}
-            </button>
-            <router-link class="button button--ghost" :to="isEditMode ? `/workspace/skills/${form.name}` : '/workspace'">
-              {{ isEditMode ? '返回详情' : '返回列表' }}
-            </router-link>
-          </div>
-        </form>
+            <section class="form-section">
+              <div class="section-heading">
+                <h2>可见范围</h2>
+              </div>
+
+              <div class="scope-picker scope-picker--cards" role="radiogroup" aria-label="可见范围">
+                <button
+                  v-for="option in scopeOptions"
+                  :key="option.value"
+                  type="button"
+                  class="scope-tag"
+                  :class="{ 'scope-tag--active': form.scope_type === option.value }"
+                  :aria-checked="form.scope_type === option.value ? 'true' : 'false'"
+                  role="radio"
+                  @click="selectScopeType(option.value)"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+              <small class="scope-picker__hint">{{ selectedScopeHelp }}</small>
+
+              <div v-if="form.scope_type === 'GROUP'" class="field scope-target-panel">
+                <span>归属组</span>
+                <div v-if="groupOptions.length" class="scope-option-list" aria-label="归属组">
+                  <button
+                    v-for="group in groupOptions"
+                    :key="group.id"
+                    type="button"
+                    class="scope-option-tag"
+                    :class="{ 'scope-option-tag--active': form.group_id === String(group.id) }"
+                    :disabled="groupOptionsLoading"
+                    @click="selectGroup(group)"
+                  >
+                    {{ group.name }}
+                  </button>
+                </div>
+                <small v-if="groupOptionsLoading">正在加载可选组...</small>
+                <small v-else-if="groupOptionsError" class="feedback feedback--error feedback--inline">{{ groupOptionsError }}</small>
+                <small v-else-if="!groupOptions.length">当前没有可选组。</small>
+              </div>
+
+              <div v-if="form.scope_type === 'ORGANIZATION'" class="field scope-target-panel">
+                <span>归属组织</span>
+                <div v-if="organizationOptions.length" class="scope-option-list" aria-label="归属组织">
+                  <button
+                    v-for="option in organizationOptions"
+                    :key="option.path"
+                    type="button"
+                    class="scope-option-tag"
+                    :class="{ 'scope-option-tag--active': form.scope_org_path === option.path }"
+                    :disabled="organizationOptionsLoading"
+                    @click="selectOrganization(option)"
+                  >
+                    {{ option.path }}{{ option.is_leaf ? '' : '（上级组织）' }}
+                  </button>
+                </div>
+                <small v-if="selectedOrganization">
+                  当前选择：{{ selectedOrganization.level }} 级组织 · {{ selectedOrganization.name }}
+                </small>
+                <small v-if="organizationOptionsLoading">正在加载可选组织...</small>
+                <small v-else-if="organizationOptionsError" class="feedback feedback--error feedback--inline">{{ organizationOptionsError }}</small>
+                <small v-else-if="!organizationOptions.length">当前没有可选组织，可能该账号尚未同步 AD 组织架构。</small>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-heading">
+                <h2>描述</h2>
+              </div>
+              <label class="field">
+                <span>Markdown 内容</span>
+                <textarea
+                  v-model="form.description_markdown"
+                  class="text-area text-area--markdown"
+                  rows="14"
+                  placeholder="写清用途、安装方式和注意事项"
+                />
+              </label>
+            </section>
+
+            <section v-if="error" class="feedback feedback--error">{{ error }}</section>
+
+            <section class="submit-bar">
+              <p>{{ submitHint }}</p>
+              <div class="form-actions">
+                <button class="button" :disabled="submitting" type="submit">
+                  {{ submitting ? '提交中...' : isEditMode ? '保存并升级' : '创建 Skill' }}
+                </button>
+                <router-link class="button button--ghost" :to="isEditMode ? `/workspace/skills/${form.name}` : '/workspace'">
+                  {{ isEditMode ? '返回详情' : '返回列表' }}
+                </router-link>
+              </div>
+            </section>
+          </form>
+        </section>
       </section>
     </main>
   </div>

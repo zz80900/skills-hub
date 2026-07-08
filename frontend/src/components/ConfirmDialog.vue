@@ -85,7 +85,6 @@ const { dialogRef, handleBackdropClick } = useModalLifecycle(() => props.open, c
 
           <div class="detail-modal__header">
             <div>
-              <p class="eyebrow">操作确认</p>
               <h2 :id="titleId">{{ title }}</h2>
             </div>
             <p v-if="summary" class="detail-modal__summary">{{ summary }}</p>

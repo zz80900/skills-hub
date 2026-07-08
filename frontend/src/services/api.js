@@ -318,13 +318,42 @@ export async function fetchPublicConfig() {
 }
 
 export async function fetchSkills(query, options = {}) {
-  const payload = await request(buildUrl('/api/skills', { q: query, page: options.page, page_size: options.pageSize }), {
+  const payload = await request(buildUrl('/api/skills', {
+    q: query,
+    page: options.page,
+    page_size: options.pageSize,
+    include_remote: options.includeRemote,
+  }), {
     authMode: AUTH_MODE_OPTIONAL,
   })
   return {
     ...payload,
     local_items: (payload.local_items || []).map(normalizeSkillPayload),
     remote_items: (payload.remote_items || []).map(normalizeSkillPayload),
+  }
+}
+
+export async function fetchLocalSkills(query) {
+  const payload = await request(buildUrl('/api/skills/local', { q: query }), {
+    authMode: AUTH_MODE_OPTIONAL,
+  })
+  return {
+    ...payload,
+    items: (payload.items || []).map(normalizeSkillPayload),
+  }
+}
+
+export async function fetchRemoteSkills(query, options = {}) {
+  const payload = await request(buildUrl('/api/skills/skills_sh', {
+    q: query,
+    page: options.page,
+    page_size: options.pageSize,
+  }), {
+    authMode: AUTH_MODE_OPTIONAL,
+  })
+  return {
+    ...payload,
+    items: (payload.items || []).map(normalizeSkillPayload),
   }
 }
 

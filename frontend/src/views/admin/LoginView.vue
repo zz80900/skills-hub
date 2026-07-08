@@ -36,15 +36,21 @@ async function handleSubmit() {
 <template>
   <div class="page-shell">
     <SiteHeader />
-    <main class="page-content page-content--narrow">
-      <section class="admin-panel">
-        <div class="admin-panel__heading">
-          <p class="eyebrow">登录</p>
-          <h1>进入 Skill 工作台</h1>
-          <p>域账号直接登录使用 , 无需注册</p>
+    <main class="page-content page-content--login">
+      <section class="login-shell">
+        <div class="login-copy">
+          <h1>NEXGO Skills</h1>
+          <div class="login-signal">
+            <span>Local Skills</span>
+            <span>Group Scope</span>
+            <span>Version Flow</span>
+          </div>
         </div>
 
-        <form class="form-card" @submit.prevent="handleSubmit">
+        <form class="form-card login-card" @submit.prevent="handleSubmit">
+          <div class="login-card__heading">
+            <h2>登录</h2>
+          </div>
           <label class="field">
             <span>用户名</span>
             <input v-model="form.username" class="text-input" type="text" autocomplete="username" />

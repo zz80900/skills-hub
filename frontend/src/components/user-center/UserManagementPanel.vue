@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import InfoModal from '../InfoModal.vue'
 import ConfirmDialog from '../ConfirmDialog.vue'
 import ListState from '../ListState.vue'
 import {
@@ -369,26 +368,27 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="admin-toolbar">
-    <div class="admin-toolbar__intro">
-      <p class="eyebrow">用户管理</p>
+  <section class="operations-panel operations-panel--users">
+    <div class="operations-panel__copy">
       <h1>账号与权限</h1>
-      <p class="admin-toolbar__summary">支持按用户名或姓名搜索，滚动到底部自动加载更多账号。</p>
+      <div class="operations-panel__chips" aria-label="用户管理状态">
+        <span>{{ resultsSummary }}</span>
+        <span>{{ hasMore ? '滚动加载更多' : '当前页已完整加载' }}</span>
+      </div>
     </div>
-    <div class="admin-toolbar__actions">
+    <div class="operations-panel__actions">
       <button class="button" type="button" @click="openCreateModal">新增用户</button>
     </div>
   </section>
 
-  <section class="admin-panel">
-    <div class="admin-panel__heading">
-      <p class="eyebrow">用户列表</p>
-      <h2>全部账号</h2>
-      <p>管理员可以编辑用户信息、停启账号和重置密码。</p>
-    </div>
+  <section class="identity-workbench">
+    <section class="admin-panel identity-list-panel">
+      <div class="section-heading section-heading--inline">
+        <h2>全部账号</h2>
+      </div>
 
-    <div class="user-management__controls">
-      <label class="search-field search-field--admin user-management__search" for="user-search">
+      <div class="user-management__controls">
+        <label class="search-field search-field--admin user-management__search" for="user-search">
         <div class="search-field__meta">
           <span class="search-field__label">搜索用户名或姓名</span>
           <span class="search-field__status">{{ resultsSummary }}</span>
@@ -414,11 +414,11 @@ onBeforeUnmount(() => {
           />
           <button v-if="search" class="search-field__clear" type="button" @click="search = ''">清空</button>
         </div>
-      </label>
-    </div>
+        </label>
+      </div>
 
-    <section v-if="actionError" class="feedback feedback--error">{{ actionError }}</section>
-    <ListState
+      <section v-if="actionError" class="feedback feedback--error">{{ actionError }}</section>
+      <ListState
       :error="blockingListError"
       :loading="loading && !users.length"
       :empty="!users.length"
@@ -448,27 +448,27 @@ onBeforeUnmount(() => {
           </thead>
           <tbody>
             <tr v-for="user in users" :key="user.id">
-              <td>
+              <td data-label="用户名">
                 <div class="user-table__title">
                   <strong>{{ user.username }}</strong>
                   <small v-if="authState.user?.id === user.id">当前登录账号</small>
                   <small v-else-if="user.external_principal">{{ user.external_principal }}</small>
                 </div>
               </td>
-              <td>{{ getUserDisplayName(user) }}</td>
-              <td>{{ formatSource(user.source) }}</td>
-              <td>{{ user.role === 'ADMIN' ? '管理员' : '普通用户' }}</td>
-              <td>
+              <td data-label="姓名">{{ getUserDisplayName(user) }}</td>
+              <td data-label="来源">{{ formatSource(user.source) }}</td>
+              <td data-label="角色">{{ user.role === 'ADMIN' ? '管理员' : '普通用户' }}</td>
+              <td data-label="状态">
                 <span class="status-chip" :class="{ 'status-chip--deleted': !user.is_active }">
                   {{ user.is_active ? '启用中' : '已停用' }}
                 </span>
               </td>
-              <td>{{ formatDate(user.created_at) }}</td>
-              <td>
+              <td data-label="创建时间">{{ formatDate(user.created_at) }}</td>
+              <td data-label="操作">
                 <div class="admin-table__actions">
-                  <button class="button button--ghost" type="button" @click="startEdit(user)">编辑</button>
+                  <button class="button button--ghost button--compact" type="button" @click="startEdit(user)">编辑</button>
                   <button
-                    class="button button--ghost"
+                    class="button button--ghost button--compact"
                     type="button"
                     :disabled="togglingId === user.id"
                     @click="quickToggle(user)"
@@ -476,7 +476,7 @@ onBeforeUnmount(() => {
                     {{ togglingId === user.id ? '处理中...' : user.is_active ? '停用' : '启用' }}
                   </button>
                   <button
-                    class="button button--ghost"
+                    class="button button--ghost button--compact"
                     type="button"
                     :disabled="resettingId === user.id || user.source === 'AD'"
                     @click="handlePasswordReset(user)"
@@ -500,38 +500,44 @@ onBeforeUnmount(() => {
       <p v-else class="user-management__footer">
         {{ hasMore ? '继续向下滚动以加载更多用户' : `已加载全部 ${total} 个用户` }}
       </p>
-    </ListState>
-  </section>
+      </ListState>
+    </section>
 
-  <InfoModal :open="isUserModalOpen" :title="modalTitle" :summary="modalSummary" width="720px" @close="closeUserModal">
-    <form class="form-card form-card--modal" @submit.prevent="handleSubmit">
-      <label class="field">
-        <span>用户名</span>
-        <input v-model="form.username" class="text-input" type="text" :disabled="isEditingAdUser" />
-      </label>
-      <p v-if="isEditingAdUser" class="feedback feedback--inline">AD 用户名由域账号映射，不支持手动修改。</p>
-      <label v-if="!isEditMode" class="field">
-        <span>初始密码</span>
-        <input v-model="form.password" class="text-input" type="password" />
-      </label>
-      <label class="field">
-        <span>角色</span>
-        <select v-model="form.role" class="text-input">
-          <option value="USER">普通用户</option>
-          <option value="ADMIN">管理员</option>
-        </select>
-      </label>
-      <label class="field field--inline">
-        <input v-model="form.is_active" type="checkbox" />
-        <span>启用账号</span>
-      </label>
-      <p v-if="formError" class="feedback feedback--error feedback--inline">{{ formError }}</p>
-      <div class="form-actions">
-        <button class="button" :disabled="submitting" type="submit">{{ submitLabel }}</button>
-        <button class="button button--ghost" type="button" @click="closeUserModal">取消</button>
+    <aside v-if="isUserModalOpen" class="admin-panel identity-editor-panel">
+      <div class="section-heading">
+        <h2>{{ modalTitle }}</h2>
+        <span class="status-chip">{{ modalSummary }}</span>
       </div>
-    </form>
-  </InfoModal>
+
+      <form class="form-card form-card--flat" @submit.prevent="handleSubmit">
+        <label class="field">
+          <span>用户名</span>
+          <input v-model="form.username" class="text-input" type="text" :disabled="isEditingAdUser" />
+        </label>
+        <p v-if="isEditingAdUser" class="feedback feedback--inline">AD 用户名由域账号映射，不支持手动修改。</p>
+        <label v-if="!isEditMode" class="field">
+          <span>初始密码</span>
+          <input v-model="form.password" class="text-input" type="password" />
+        </label>
+        <label class="field">
+          <span>角色</span>
+          <select v-model="form.role" class="text-input">
+            <option value="USER">普通用户</option>
+            <option value="ADMIN">管理员</option>
+          </select>
+        </label>
+        <label class="field field--inline">
+          <input v-model="form.is_active" type="checkbox" />
+          <span>启用账号</span>
+        </label>
+        <p v-if="formError" class="feedback feedback--error feedback--inline">{{ formError }}</p>
+        <div class="form-actions">
+          <button class="button" :disabled="submitting" type="submit">{{ submitLabel }}</button>
+          <button class="button button--ghost" type="button" @click="closeUserModal">取消</button>
+        </div>
+      </form>
+    </aside>
+  </section>
 
   <ConfirmDialog
     :open="pendingAction?.type === 'toggle-user'"

@@ -90,9 +90,8 @@ watch(
       <section v-else-if="skill" class="detail-panel">
         <div class="detail-panel__header">
           <div>
-            <p class="eyebrow">{{ isAdmin ? '工作台' : '我的 Skill' }}</p>
             <h1>{{ skill.name }}</h1>
-            <p class="detail-modal__summary">当前版本 {{ skill.current_version }}</p>
+            <span class="detail-modal__summary">版本 {{ skill.current_version }}</span>
           </div>
           <div class="admin-toolbar__actions admin-detail__actions">
             <router-link class="button button--ghost" to="/workspace">返回列表</router-link>

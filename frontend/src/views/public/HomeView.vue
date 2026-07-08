@@ -6,11 +6,12 @@ import SiteHeader from '../../components/SiteHeader.vue'
 import SkillCard from '../../components/SkillCard.vue'
 import SkillDetailModal from '../../components/SkillDetailModal.vue'
 import ListState from '../../components/ListState.vue'
-import { fetchSkill, fetchSkills } from '../../services/api'
+import { fetchLocalSkills, fetchRemoteSkills, fetchSkill } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
-const loading = ref(false)
+const localLoading = ref(false)
+const remoteLoading = ref(false)
 const remoteLoadingMore = ref(false)
 const error = ref('')
 const remoteError = ref('')
@@ -27,7 +28,8 @@ const remoteSentinel = ref(null)
 const showBackToTop = ref(false)
 let searchTimer = null
 let detailRequestId = 0
-let skillRequestId = 0
+let localRequestId = 0
+let remoteRequestId = 0
 let remoteObserver = null
 
 const libraryTabs = [
@@ -54,6 +56,37 @@ const remoteTabSummary = computed(() => {
 const activeLibraryLabel = computed(() =>
   libraryTabs.find((tab) => tab.key === activeLibraryTab.value)?.label || '本地库',
 )
+const activeSkills = computed(() => (activeLibraryTab.value === 'local' ? localSkills.value : remoteSkills.value))
+const activeSummary = computed(() => (activeLibraryTab.value === 'local' ? localTabSummary.value : remoteTabSummary.value))
+const activeLoading = computed(() => (activeLibraryTab.value === 'local' ? localLoading.value : remoteLoading.value))
+const activeLoadingText = computed(() => (activeLibraryTab.value === 'local' ? '正在加载本地库...' : '正在加载 skills.sh...'))
+const activeError = computed(() => (activeLibraryTab.value === 'local' ? error.value : remoteError.value))
+const activeEmptyText = computed(() => {
+  if (activeLibraryTab.value === 'local') {
+    return search.value ? `本地库没有找到与“${search.value}”匹配的 Skill。` : '本地库当前还没有 Skill。'
+  }
+  return search.value ? `skills.sh 没有找到与“${search.value}”匹配的 Skill。` : '当前未获取到 skills.sh Skill。'
+})
+const sourcePanels = computed(() => [
+  {
+    key: 'local',
+    label: '本地库',
+    title: '内部资产',
+    count: localSkills.value.length,
+    summary: localLoading.value ? '正在加载本地库' : error.value ? '加载失败' : localTabSummary.value,
+    loading: localLoading.value,
+    error: error.value,
+  },
+  {
+    key: 'skills_sh',
+    label: 'skills.sh',
+    title: '外部发现',
+    count: remoteSkills.value.length,
+    summary: remoteLoading.value ? '正在加载 skills.sh' : remoteError.value ? '加载失败' : remoteTabSummary.value,
+    loading: remoteLoading.value,
+    error: remoteError.value,
+  },
+])
 
 function buildHomeQuery(overrides = {}) {
   const nextQuery = { ...route.query, ...overrides }
@@ -79,59 +112,86 @@ function mergeRemoteSkills(items) {
   remoteSkills.value = merged
 }
 
-async function loadSkills(keyword = '', options = {}) {
-  const nextPage = options.page || 1
-  const appendRemote = Boolean(options.appendRemote)
-  const requestId = appendRemote ? skillRequestId : skillRequestId + 1
-
-  if (appendRemote) {
-    remoteLoadingMore.value = true
-  } else {
-    skillRequestId = requestId
-    loading.value = true
-    error.value = ''
-    remoteError.value = ''
-  }
+async function loadLocalSkills(keyword = '') {
+  const requestId = localRequestId + 1
+  localRequestId = requestId
+  localLoading.value = true
+  error.value = ''
 
   try {
-    const payload = await fetchSkills(keyword, { page: nextPage, pageSize: remotePageSize.value })
-    if (!appendRemote && requestId !== skillRequestId) {
+    const payload = await fetchLocalSkills(keyword)
+    if (requestId !== localRequestId) {
       return
     }
-    localSkills.value = payload.local_items || []
-    remoteError.value = payload.remote_error || ''
-    remotePage.value = payload.remote_page || nextPage
-    remotePageSize.value = payload.remote_page_size || remotePageSize.value
-    remoteHasMore.value = Boolean(payload.remote_has_more)
-
-    if (appendRemote) {
-      mergeRemoteSkills(payload.remote_items || [])
-    } else {
-      remoteSkills.value = payload.remote_items || []
-    }
+    localSkills.value = payload.items || []
   } catch (err) {
-    if (!appendRemote && requestId !== skillRequestId) {
+    if (requestId !== localRequestId) {
       return
     }
-    if (appendRemote) {
-      remoteError.value = err.message
-    } else {
-      error.value = err.message
-    }
+    error.value = err.message
   } finally {
-    if (appendRemote) {
-      remoteLoadingMore.value = false
-    } else if (requestId === skillRequestId) {
-      loading.value = false
+    if (requestId === localRequestId) {
+      localLoading.value = false
     }
   }
 }
 
+async function loadRemoteSkills(keyword = '', options = {}) {
+  const nextPage = options.page || 1
+  const appendRemote = Boolean(options.appendRemote)
+  const requestId = appendRemote ? remoteRequestId : remoteRequestId + 1
+
+  if (appendRemote) {
+    remoteLoadingMore.value = true
+  } else {
+    remoteRequestId = requestId
+    remoteLoading.value = true
+    remoteError.value = ''
+  }
+
+  try {
+    const payload = await fetchRemoteSkills(keyword, {
+      page: nextPage,
+      pageSize: remotePageSize.value,
+    })
+    if (requestId !== remoteRequestId) {
+      return
+    }
+
+    remoteError.value = payload.error || ''
+    remotePage.value = payload.page || nextPage
+    remotePageSize.value = payload.page_size || remotePageSize.value
+    remoteHasMore.value = Boolean(payload.has_more)
+
+    if (appendRemote) {
+      mergeRemoteSkills(payload.items || [])
+    } else {
+      remoteSkills.value = payload.items || []
+    }
+  } catch (err) {
+    if (requestId !== remoteRequestId) {
+      return
+    }
+    remoteError.value = err.message
+  } finally {
+    if (appendRemote) {
+      remoteLoadingMore.value = false
+    } else if (requestId === remoteRequestId) {
+      remoteLoading.value = false
+    }
+  }
+}
+
+function refreshSkillLists(keyword = '') {
+  loadLocalSkills(keyword)
+  loadRemoteSkills(keyword, { page: 1 })
+}
+
 async function loadMoreRemoteSkills() {
-  if (loading.value || remoteLoadingMore.value || !remoteHasMore.value || remoteError.value) {
+  if (remoteLoading.value || remoteLoadingMore.value || !remoteHasMore.value || remoteError.value) {
     return
   }
-  await loadSkills(search.value, { page: remotePage.value + 1, appendRemote: true })
+  await loadRemoteSkills(search.value, { page: remotePage.value + 1, appendRemote: true })
 }
 
 async function loadSkillDetail(source, slug) {
@@ -173,7 +233,11 @@ function clearSearch() {
 }
 
 function retryLoadSkills() {
-  loadSkills(search.value, { page: 1 })
+  if (activeLibraryTab.value === 'skills_sh') {
+    loadRemoteSkills(search.value, { page: 1 })
+    return
+  }
+  loadLocalSkills(search.value)
 }
 
 function openSkillDetail(skill) {
@@ -213,7 +277,7 @@ async function syncRemoteObserver() {
     || !remoteSentinel.value
     || !remoteHasMore.value
     || remoteLoadingMore.value
-    || loading.value
+    || remoteLoading.value
     || remoteError.value
   ) {
     return
@@ -233,7 +297,7 @@ async function syncRemoteObserver() {
 watch(search, (value) => {
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => {
-    loadSkills(value, { page: 1 })
+    refreshSkillLists(value)
   }, 250)
 })
 
@@ -253,14 +317,14 @@ watch(
 )
 
 watch(
-  [activeLibraryTab, remoteHasMore, remoteLoadingMore, loading, remoteError, () => remoteSkills.value.length],
+  [activeLibraryTab, remoteHasMore, remoteLoadingMore, remoteLoading, remoteError, () => remoteSkills.value.length],
   () => {
     syncRemoteObserver()
   },
 )
 
 onMounted(() => {
-  loadSkills('', { page: 1 })
+  refreshSkillLists('')
   handleWindowScroll()
   window.addEventListener('scroll', handleWindowScroll, { passive: true })
 })
@@ -275,43 +339,59 @@ onBeforeUnmount(() => {
 <template>
   <div class="page-shell">
     <SiteHeader />
-    <main class="page-content">
-      <section class="search-panel search-panel--home">
-        <div class="admin-search__copy">
-          <p class="eyebrow">Search</p>
-          <h2>统一搜索与来源切换</h2>
-          <p class="search-panel__lead">
-            在本地库与 skills.sh 之间快速切换，当前来源独立搜索 Skill，并继续保留原有详情与安装流程。
-          </p>
-          <div class="search-panel__switcher">
-            <section class="library-tabs library-tabs--embedded" aria-label="Skill 来源切换">
-              <button
-                v-for="tab in libraryTabs"
-                :key="tab.key"
-                class="library-tabs__button"
-                :class="{ 'is-active': activeLibraryTab === tab.key }"
-                type="button"
-                @click="handleLibraryTabSelect(tab.key)"
-              >
-                {{ tab.label }}
-              </button>
-            </section>
+    <main class="page-content page-content--library">
+      <section class="library-console">
+        <div class="library-console__intro">
+          <h1 class="library-title">Skill 目录</h1>
+          <div class="library-console__meta" aria-label="Skill 来源状态">
+            <span>{{ localTabSummary }}</span>
+            <span>{{ remoteTabSummary }}</span>
           </div>
         </div>
-        <label class="search-field search-field--admin search-field--home-control" for="skill-search">
+
+        <div class="source-card-list" role="tablist" aria-label="Skill 来源切换">
+          <button
+            v-for="panel in sourcePanels"
+            :key="panel.key"
+            class="source-card"
+            :class="{
+              'is-active': activeLibraryTab === panel.key,
+              'is-loading': panel.loading,
+              'has-error': panel.error,
+            }"
+            type="button"
+            role="tab"
+            :aria-selected="activeLibraryTab === panel.key"
+            :aria-busy="panel.loading ? 'true' : 'false'"
+            @click="handleLibraryTabSelect(panel.key)"
+          >
+            <span class="source-card__label">{{ panel.label }}</span>
+            <strong>{{ panel.title }}</strong>
+            <span class="source-card__count">{{ panel.count }}</span>
+            <span class="source-card__summary">{{ panel.summary }}</span>
+          </button>
+        </div>
+
+        <label class="search-field search-field--home-control library-console__search" for="skill-search">
           <div class="search-field__meta">
-            <span class="search-field__label">当前来源：{{ activeLibraryLabel }}，按名称、用途或作者关键词检索。</span>
-            <span class="search-field__status">
-              {{ activeLibraryTab === 'local' ? localTabSummary : remoteTabSummary }}
-            </span>
+            <span class="search-field__label">当前来源：{{ activeLibraryLabel }}</span>
+            <span class="search-field__status">{{ activeSummary }}</span>
           </div>
           <div class="search-field__control">
+            <span class="search-field__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path
+                  d="m20.03 18.97-4.36-4.36a6.84 6.84 0 1 0-1.06 1.06l4.36 4.36a.75.75 0 0 0 1.06-1.06ZM5.5 10.25a4.75 4.75 0 1 1 9.5 0 4.75 4.75 0 0 1-9.5 0Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
             <input
               id="skill-search"
               v-model.trim="search"
               class="text-input"
               type="search"
-              placeholder="例如：plm、admin、markdown"
+              placeholder="搜索 Skill、作者或用途"
             />
             <button
               v-if="search"
@@ -325,64 +405,44 @@ onBeforeUnmount(() => {
         </label>
       </section>
 
-      <ListState
-        :error="error"
-        :loading="loading && !localSkills.length && !remoteSkills.length"
-        loading-text="正在加载 Skills..."
-        @retry="retryLoadSkills"
-      >
-        <section v-if="activeLibraryTab === 'local'" class="skill-section">
-          <div class="skill-section__header">
-            <div>
-              <p class="eyebrow">本地库</p>
-              <h2>内部 Skills</h2>
-            </div>
-            <p class="skill-section__summary">{{ loading ? '正在检索...' : localTabSummary }}</p>
-          </div>
-          <ListState :empty="!localSkills.length" :empty-text="search ? `本地库没有找到与“${search}”匹配的 Skill。` : '本地库当前还没有 Skill。'">
-            <section class="skills-grid" :class="{ 'is-refreshing': loading }">
-              <SkillCard
-                v-for="skill in localSkills"
-                :key="`${skill.source}:${skill.slug}`"
-                :skill="skill"
-                @select="openSkillDetail"
-              />
-            </section>
-          </ListState>
-        </section>
+      <section class="library-results">
+        <header class="library-results__bar" aria-live="polite">
+          <span class="library-results__source">
+            <span class="library-results__source-dot" aria-hidden="true"></span>
+            {{ activeLibraryLabel }}
+          </span>
+          <p class="library-results__summary">{{ activeLoading ? activeLoadingText : activeSummary }}</p>
+        </header>
 
-        <section v-else class="skill-section">
-          <div class="skill-section__header">
-            <div>
-              <p class="eyebrow">skills.sh</p>
-              <h2>远程 Skills</h2>
-            </div>
-            <p class="skill-section__summary">{{ loading ? '正在检索...' : remoteTabSummary }}</p>
-          </div>
-          <ListState
-            :error="remoteError"
-            :empty="!remoteSkills.length"
-            :empty-text="search ? `skills.sh 没有找到与“${search}”匹配的 Skill。` : '当前未获取到 skills.sh Skill。'"
-            @retry="retryLoadSkills"
+        <ListState
+          :error="activeError"
+          :loading="activeLoading && !activeSkills.length"
+          :empty="!activeSkills.length"
+          :empty-text="activeEmptyText"
+          :loading-text="activeLoadingText"
+          @retry="retryLoadSkills"
+        >
+          <section
+            class="skills-grid skills-grid--directory"
+            :class="{ 'is-refreshing': activeLoading && activeSkills.length }"
           >
-            <section class="skills-grid skills-grid--masonry" :class="{ 'is-refreshing': loading }">
-              <SkillCard
-                v-for="skill in remoteSkills"
-                :key="`${skill.source}:${skill.slug}`"
-                :skill="skill"
-                @select="openSkillDetail"
-              />
-            </section>
-          </ListState>
+            <SkillCard
+              v-for="skill in activeSkills"
+              :key="`${skill.source}:${skill.slug}`"
+              :skill="skill"
+              @select="openSkillDetail"
+            />
+          </section>
+
           <div
-            v-if="remoteSkills.length && (remoteHasMore || remoteLoadingMore)"
+            v-if="activeLibraryTab === 'skills_sh' && activeSkills.length && !remoteLoading && (remoteHasMore || remoteLoadingMore)"
             ref="remoteSentinel"
             class="skills-waterfall-status"
           >
             {{ remoteLoadingMore ? '正在继续加载 skills.sh Skills...' : '向下滚动继续加载' }}
           </div>
-        </section>
-      </ListState>
+        </ListState>
+      </section>
     </main>
     <SkillDetailModal
       :open="isSkillModalOpen"

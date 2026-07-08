@@ -43,7 +43,6 @@ watch(
       <section v-else-if="error" class="feedback feedback--error">{{ error }}</section>
       <section v-else-if="skill" class="detail-panel">
         <div class="detail-panel__header">
-          <p class="eyebrow">Skill 详情</p>
           <h1>{{ skill.name }}</h1>
         </div>
 

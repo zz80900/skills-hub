@@ -1,8 +1,12 @@
 from functools import lru_cache
+from string import Formatter
 from typing import Annotated
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+INSTALL_COMMAND_TEMPLATE_FIELDS = {"skill_ref", "skill_name"}
+DEFAULT_SKILL_INSTALL_COMMAND_TEMPLATE = "npx nexgo-skills install {skill_ref}"
 
 
 class Settings(BaseSettings):
@@ -45,6 +49,7 @@ class Settings(BaseSettings):
     skills_api_base_url: str = "https://skills.sh"
     skills_api_timeout_seconds: float = 15.0
     cli_install_command: str = "npx nexgo-skills --help"
+    skill_install_command_template: str = DEFAULT_SKILL_INSTALL_COMMAND_TEMPLATE
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -54,6 +59,32 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return ["http://localhost:5173"]
+
+    @field_validator("skill_install_command_template")
+    @classmethod
+    def validate_skill_install_command_template(cls, value: str) -> str:
+        template = (value or "").strip()
+        if not template:
+            return DEFAULT_SKILL_INSTALL_COMMAND_TEMPLATE
+
+        fields: set[str] = set()
+        for _, field_name, _, _ in Formatter().parse(template):
+            if field_name is None:
+                continue
+            root_name = field_name.split(".", 1)[0].split("[", 1)[0]
+            if not root_name:
+                raise ValueError("skill_install_command_template 不支持位置占位符")
+            fields.add(root_name)
+
+        unknown_fields = fields - INSTALL_COMMAND_TEMPLATE_FIELDS
+        if unknown_fields:
+            names = ", ".join(sorted(unknown_fields))
+            raise ValueError(f"skill_install_command_template 包含不支持的占位符：{names}")
+        if not fields:
+            raise ValueError("skill_install_command_template 必须包含 {skill_ref} 或 {skill_name}")
+
+        template.format(skill_ref="demo-skill", skill_name="demo-skill")
+        return template
 
 
 @lru_cache

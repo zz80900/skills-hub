@@ -23,14 +23,15 @@ os.environ["NEXUS_PASSWORD"] = "tester"
 from fastapi.testclient import TestClient
 
 from app.api import public as public_api
+from app.core.config import get_settings
 from app.db.base import Base
 from app.db.schema import _ensure_postgresql_skill_name_uniqueness_policy, ensure_schema_compatibility
 from app.db.session import engine
 from app.main import app
-from app.services import user_service
+from app.services import skill_service, user_service
 from app.services.ad_auth import ActiveDirectoryIdentity, ActiveDirectoryUnavailableError
 from app.services import nexus as nexus_service
-from app.services.skills_registry import RegistrySkillDetail, RegistrySkillSummary
+from app.services.skills_registry import RegistrySkillDetail, RegistrySkillSummary, build_remote_install_command
 
 
 def make_zip(
@@ -2040,6 +2041,82 @@ def test_public_skills_groups_local_and_remote_results(client: TestClient, monke
     assert payload["remote_has_more"] is True
 
 
+def test_public_skills_can_skip_remote_search(client: TestClient, monkeypatch):
+    remote_called = False
+
+    async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
+        nonlocal remote_called
+        remote_called = True
+        return [], False
+
+    monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
+
+    create_local_skill(client, monkeypatch, auth_headers(client), name="plm-assistant")
+
+    response = client.get("/api/skills", params={"q": "local", "include_remote": "false"})
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["local_items"][0]["name"] == "plm-assistant"
+    assert payload["remote_items"] == []
+    assert payload["remote_error"] is None
+    assert payload["remote_has_more"] is False
+    assert remote_called is False
+
+
+def test_public_local_skills_endpoint_is_local_only(client: TestClient, monkeypatch):
+    remote_called = False
+
+    async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
+        nonlocal remote_called
+        remote_called = True
+        return [], False
+
+    monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
+
+    create_local_skill(client, monkeypatch, auth_headers(client), name="plm-assistant")
+
+    response = client.get("/api/skills/local", params={"q": "local"})
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["items"][0]["name"] == "plm-assistant"
+    assert payload["items"][0]["source"] == "local"
+    assert remote_called is False
+
+
+def test_public_skills_sh_endpoint_returns_remote_only(client: TestClient, monkeypatch):
+    async def fake_search_remote_skills(query: str | None, page: int = 1, page_size: int = 12):
+        assert query == "design"
+        assert page == 2
+        assert page_size == 6
+        return [
+            RegistrySkillSummary(
+                slug="vercel-labs/agent-skills/ui-ux-pro-max",
+                name="ui-ux-pro-max",
+                source="vercel-labs/agent-skills",
+                installs=999,
+                description_html="<p>Remote summary</p>",
+                install_command='npx nexgo-skills install vercel-labs/agent-skills/ui-ux-pro-max',
+            )
+        ], False
+
+    monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
+
+    create_local_skill(client, monkeypatch, auth_headers(client), name="plm-assistant")
+
+    response = client.get("/api/skills/skills_sh", params={"q": "design", "page": 2, "page_size": 6})
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["items"][0]["source"] == "skills_sh"
+    assert payload["items"][0]["slug"] == "vercel-labs/agent-skills/ui-ux-pro-max"
+    assert payload["error"] is None
+    assert payload["page"] == 2
+    assert payload["page_size"] == 6
+    assert payload["has_more"] is False
+
+
 def test_public_remote_detail_uses_source_and_slug(client: TestClient, monkeypatch):
     async def fake_remote_detail(slug: str):
         assert slug == "vercel-labs/agent-skills/frontend-design"
@@ -2086,6 +2163,25 @@ def test_public_config_returns_cli_install_command(client: TestClient):
     assert response.status_code == 200
     command = response.json()["cli_install_command"]
     assert command == "npx nexgo-skills --help"
+
+
+def test_skill_install_command_template_configures_local_and_remote(monkeypatch):
+    monkeypatch.setenv(
+        "SKILL_INSTALL_COMMAND_TEMPLATE",
+        "internal-skill install {skill_ref} --name {skill_name}",
+    )
+    get_settings.cache_clear()
+
+    try:
+        assert skill_service.get_install_command("demo-skill") == (
+            "internal-skill install demo-skill --name demo-skill"
+        )
+        assert build_remote_install_command("vercel-labs/agent-skills/frontend-design") == (
+            "internal-skill install vercel-labs/agent-skills/frontend-design --name frontend-design"
+        )
+    finally:
+        monkeypatch.delenv("SKILL_INSTALL_COMMAND_TEMPLATE", raising=False)
+        get_settings.cache_clear()
 
 
 def test_public_remote_pagination_uses_page_arguments(client, monkeypatch):

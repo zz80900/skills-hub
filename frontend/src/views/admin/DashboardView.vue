@@ -36,19 +36,9 @@ const activeTab = computed(() => {
   const requestedTab = typeof route.query.tab === 'string' ? route.query.tab : 'skills'
   return tabs.value.some((item) => item.key === requestedTab) ? requestedTab : tabs.value[0]?.key || 'skills'
 })
-
-const centerSummary = computed(() => {
-  if (loadingGroupAccess.value) {
-    return '正在同步用户中心权限...'
-  }
-  if (activeTab.value === 'groups') {
-    return '统一维护用户组与组员，支持管理员治理与组长成员维护。'
-  }
-  if (activeTab.value === 'users') {
-    return '管理员可维护账号状态、角色和密码。'
-  }
-  return '统一查看并管理 Skill、用户组与账号能力。'
-})
+const activeTabItem = computed(() => tabs.value.find((item) => item.key === activeTab.value) || tabs.value[0])
+const roleLabel = computed(() => (isAdmin.value ? '管理员' : '成员'))
+const centerStatus = computed(() => (loadingGroupAccess.value ? '权限同步中' : roleLabel.value))
 const organizationLevels = computed(() => getUserOrganizationLevels(authState.user))
 
 function switchTab(nextTab) {
@@ -101,33 +91,44 @@ onMounted(() => {
 <template>
   <div class="page-shell">
     <SiteHeader />
-    <main class="page-content">
-      <section class="admin-toolbar">
-        <div class="admin-toolbar__intro">
-          <p class="eyebrow">用户中心</p>
-          <h1>{{ userCenterLabel }}</h1>
-          <p class="admin-toolbar__summary">{{ centerSummary }}</p>
-          <p v-if="organizationLevels.length" class="admin-toolbar__summary">
-            当前组织：{{ organizationLevels.join(' / ') }}
-          </p>
-        </div>
-        <div class="admin-toolbar__actions user-center-switches">
-          <button
-            v-for="tab in tabs"
-            :key="tab.key"
-            class="button button--ghost"
-            :class="{ 'button--active': activeTab === tab.key }"
-            type="button"
-            @click="switchTab(tab.key)"
-          >
-            {{ tab.label }}
-          </button>
+    <main class="page-content page-content--workspace">
+      <section class="workspace-shell">
+        <aside class="workspace-rail">
+          <div class="workspace-identity">
+            <h1>{{ userCenterLabel }}</h1>
+            <span>{{ roleLabel }}</span>
+          </div>
+
+          <nav class="workspace-nav" aria-label="用户中心模块">
+            <button
+              v-for="tab in tabs"
+              :key="tab.key"
+              class="workspace-tab"
+              :class="{ 'is-active': activeTab === tab.key }"
+              type="button"
+              @click="switchTab(tab.key)"
+            >
+              <span>{{ tab.label }}</span>
+            </button>
+          </nav>
+
+          <div v-if="organizationLevels.length" class="workspace-organization">
+            <span>当前组织</span>
+            <strong>{{ organizationLevels.join(' / ') }}</strong>
+          </div>
+        </aside>
+
+        <div class="workspace-main">
+          <header class="workspace-main__header">
+            <h2>{{ activeTabItem?.label || '工作台' }}</h2>
+            <span class="workspace-main__status">{{ centerStatus }}</span>
+          </header>
+
+          <SkillManagementPanel v-if="activeTab === 'skills'" />
+          <GroupManagementPanel v-else-if="activeTab === 'groups'" />
+          <UserManagementPanel v-else />
         </div>
       </section>
-
-      <SkillManagementPanel v-if="activeTab === 'skills'" />
-      <GroupManagementPanel v-else-if="activeTab === 'groups'" />
-      <UserManagementPanel v-else />
     </main>
   </div>
 </template>

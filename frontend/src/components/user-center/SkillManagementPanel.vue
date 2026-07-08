@@ -14,7 +14,6 @@ let searchTimer = null
 let skillQueryId = 0
 
 const isAdmin = computed(() => authState.user?.role === 'ADMIN')
-const pageEyebrow = computed(() => (isAdmin.value ? 'Skill 管理' : '我的 Skill'))
 const pageTitle = computed(() => (isAdmin.value ? '全部 Skill' : '我上传的 Skill'))
 const searchHint = computed(() =>
   search.value
@@ -34,6 +33,11 @@ const resultSummary = computed(() => {
     ? `当前共 ${skills.value.length} 条 Skill 记录`
     : `当前共 ${skills.value.length} 个我的 Skill`
 })
+const activeSkillCount = computed(() => skills.value.filter((skill) => !skill.is_deleted).length)
+const deletedSkillCount = computed(() => skills.value.filter((skill) => skill.is_deleted).length)
+const ownershipSummary = computed(() =>
+  isAdmin.value ? '全部归属用户' : '仅我的上传记录',
+)
 const emptyStateText = computed(() => {
   if (search.value) {
     return `没有找到与“${search.value}”匹配的 Skill。`
@@ -110,26 +114,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="admin-toolbar">
-    <div class="admin-toolbar__intro">
-      <p class="eyebrow">{{ pageEyebrow }}</p>
+  <section class="operations-panel operations-panel--skills">
+    <div class="operations-panel__copy">
       <h1>{{ pageTitle }}</h1>
-      <p class="admin-toolbar__summary">{{ resultSummary }}</p>
+      <div class="operations-panel__chips" aria-label="Skill 状态摘要">
+        <span>{{ resultSummary }}</span>
+        <span>{{ ownershipSummary }}</span>
+        <span v-if="isAdmin">正常 {{ activeSkillCount }} / 删除 {{ deletedSkillCount }}</span>
+      </div>
     </div>
-    <div class="admin-toolbar__actions">
-      <router-link class="button" to="/workspace/skills/new">新增 Skill</router-link>
-    </div>
-  </section>
 
-  <section class="search-panel admin-search">
-    <div class="admin-search__copy">
-      <p class="eyebrow">快速筛选</p>
-      <h2>{{ isAdmin ? '检索全部 Skill' : '检索我的 Skill' }}</h2>
-      <p class="search-panel__lead">
-        {{ isAdmin ? '管理员列表包含全部 Skill，并展示归属人、组归属和逻辑删除状态。' : '你只能看到并操作自己上传的 Skill，也能查看每个 Skill 的可见范围。' }}
-      </p>
-    </div>
-    <label class="search-field search-field--admin" for="workspace-skill-search">
+    <label class="search-field search-field--admin operations-panel__search" for="workspace-skill-search">
       <div class="search-field__meta">
         <span class="search-field__label">{{ searchHint }}</span>
         <span class="search-field__status">{{ loading ? '检索中' : `${skills.length} 条结果` }}</span>
@@ -160,6 +155,10 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </label>
+
+    <div class="operations-panel__actions">
+      <router-link class="button" to="/workspace/skills/new">新增 Skill</router-link>
+    </div>
   </section>
 
   <ListState
@@ -175,7 +174,13 @@ onBeforeUnmount(() => {
       <button class="button button--ghost" type="button" @click="retryLoadSkills">重试</button>
     </section>
 
-    <section class="admin-table-wrap" :class="{ 'is-refreshing': loading }">
+    <section class="registry-panel">
+      <div class="registry-panel__header">
+        <h2>Skill 资产</h2>
+        <p>{{ loading ? '正在刷新列表...' : resultSummary }}</p>
+      </div>
+
+      <section class="admin-table-wrap registry-table-wrap" :class="{ 'is-refreshing': loading }">
       <table class="admin-table">
         <thead>
           <tr>
@@ -186,30 +191,37 @@ onBeforeUnmount(() => {
             <th scope="col">上传者</th>
             <th v-if="isAdmin" scope="col">状态</th>
             <th scope="col">更新时间</th>
+            <th scope="col">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="skill in skills" :key="skill.id" :class="{ 'admin-table__row--deleted': skill.is_deleted }">
-            <td>
+            <td data-label="标题">
               <router-link class="admin-table__title" :to="`/workspace/skills/${skill.name}`">
                 {{ skill.name }}
               </router-link>
             </td>
-            <td v-if="isAdmin">{{ skill.owner_username || '-' }}</td>
-            <td>{{ getSkillScopeLabel(skill) }}</td>
-            <td>
+            <td v-if="isAdmin" data-label="归属用户">{{ skill.owner_username || '-' }}</td>
+            <td data-label="可见范围">{{ getSkillScopeLabel(skill) }}</td>
+            <td data-label="当前版本">
               <span class="version-chip">{{ skill.current_version }}</span>
             </td>
-            <td>{{ skill.contributor || '-' }}</td>
-            <td v-if="isAdmin">
+            <td data-label="上传者">{{ skill.contributor || '-' }}</td>
+            <td v-if="isAdmin" data-label="状态">
               <span class="status-chip" :class="{ 'status-chip--deleted': skill.is_deleted }">
                 {{ skill.is_deleted ? '已删除' : '正常' }}
               </span>
             </td>
-            <td>{{ formatDate(skill.updated_at) }}</td>
+            <td data-label="更新时间">{{ formatDate(skill.updated_at) }}</td>
+            <td data-label="操作">
+              <router-link class="button button--ghost button--compact" :to="`/workspace/skills/${skill.name}`">
+                打开
+              </router-link>
+            </td>
           </tr>
         </tbody>
       </table>
+      </section>
     </section>
   </ListState>
 </template>

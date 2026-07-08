@@ -30,6 +30,18 @@ class SkillListResponse(BaseModel):
     remote_has_more: bool = False
 
 
+class LocalSkillListResponse(BaseModel):
+    items: list[PublicSkillSummary]
+
+
+class RemoteSkillListResponse(BaseModel):
+    items: list[PublicSkillSummary]
+    error: str | None = None
+    page: int = 1
+    page_size: int = 12
+    has_more: bool = False
+
+
 class PublicConfigResponse(BaseModel):
     cli_install_command: str
 

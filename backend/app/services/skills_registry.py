@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass
 from html import escape
 from html.parser import HTMLParser
+from time import monotonic
 from typing import Any
 from urllib.parse import urljoin
 
 import httpx
 
 from app.core.config import get_settings
+from app.services.install_command import build_skill_install_command
 from app.services.markdown import sanitize_html
 
 
@@ -17,6 +20,13 @@ PUBLIC_SOURCE_SKILLS_SH = "skills_sh"
 PUBLIC_SOURCE_SKILLS_SH_LABEL = "skills.sh"
 DEFAULT_SEARCH_LIMIT = 12
 SKILL_PATH_EXCLUDES = {"api", "_next", "docs", "blog", "pricing", "about", "privacy", "terms"}
+REMOTE_SKILL_CACHE_TTL_SECONDS = 45.0
+
+RemoteSearchKey = tuple[str, int, int]
+RemoteSearchResult = tuple[list["RegistrySkillSummary"], bool]
+_remote_search_cache: dict[RemoteSearchKey, tuple[float, RemoteSearchResult]] = {}
+_remote_search_tasks: dict[RemoteSearchKey, asyncio.Task[RemoteSearchResult]] = {}
+_remote_search_lock = asyncio.Lock()
 
 
 @dataclass(slots=True)
@@ -113,7 +123,7 @@ class SkillsHomepageParser(HTMLParser):
 
 def build_remote_install_command(skill_ref: str) -> str:
     skill_ref = skill_ref.strip().strip("/")
-    return f"npx nexgo-skills install {skill_ref}"
+    return build_skill_install_command(skill_ref)
 
 
 def _paginate(items: list[RegistrySkillSummary], page: int, page_size: int) -> tuple[list[RegistrySkillSummary], bool]:
@@ -234,8 +244,44 @@ async def search_remote_skills(
     page: int = 1,
     page_size: int = DEFAULT_SEARCH_LIMIT,
 ) -> tuple[list[RegistrySkillSummary], bool]:
+    key = ((query or "").strip(), max(page, 1), max(page_size, 1))
+    now = monotonic()
+    cached = _remote_search_cache.get(key)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    async with _remote_search_lock:
+        cached = _remote_search_cache.get(key)
+        if cached and cached[0] > monotonic():
+            return cached[1]
+
+        task = _remote_search_tasks.get(key)
+        if task is None:
+            task = asyncio.create_task(_fetch_remote_skills(*key))
+            _remote_search_tasks[key] = task
+
+    try:
+        result = await task
+    except Exception:
+        async with _remote_search_lock:
+            if _remote_search_tasks.get(key) is task:
+                del _remote_search_tasks[key]
+        raise
+
+    async with _remote_search_lock:
+        _remote_search_cache[key] = (monotonic() + REMOTE_SKILL_CACHE_TTL_SECONDS, result)
+        if _remote_search_tasks.get(key) is task:
+            del _remote_search_tasks[key]
+    return result
+
+
+async def _fetch_remote_skills(
+    query: str,
+    page: int = 1,
+    page_size: int = DEFAULT_SEARCH_LIMIT,
+) -> tuple[list[RegistrySkillSummary], bool]:
     settings = get_settings()
-    keyword = (query or "").strip()
+    keyword = query.strip()
     if not keyword:
         return await list_remote_skills(page=page, page_size=page_size)
 

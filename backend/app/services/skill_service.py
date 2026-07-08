@@ -18,6 +18,7 @@ from app.models.skill import (
 )
 from app.models.user import User
 from app.services.group_service import resolve_group_for_skill_binding
+from app.services.install_command import build_skill_install_command
 from app.services.markdown import render_markdown
 from app.services.nexus import build_package_url
 from app.services.user_service import ROLE_ADMIN
@@ -143,7 +144,7 @@ async def validate_zip_file(upload_file: UploadFile) -> bytes:
 
 
 def get_install_command(skill_name: str) -> str:
-    return f"npx nexgo-skills install {skill_name}"
+    return build_skill_install_command(skill_name)
 
 
 def get_next_version(current_version: str) -> str:

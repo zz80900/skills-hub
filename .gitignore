@@ -33,6 +33,7 @@ backend/tests/*.db-journal
 *.swp
 Thumbs.db
 .dev-env.state.json
+.impeccable/
 .claude/*.pid
 .codex/skills/
 backend/local-dev.db

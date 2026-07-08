@@ -66,6 +66,8 @@ const pageSummary = computed(() => {
   }
   return canManageAnyGroup.value ? `当前共 ${groups.value.length} 个可见用户组` : `当前共加入 ${groups.value.length} 个用户组`
 })
+const isCreatingGroup = computed(() => !selectedGroup.value)
+const canShowGroupWorkspace = computed(() => groups.value.length > 0 || isAdmin.value)
 const blockingLoadError = computed(() => (!groups.value.length ? loadError.value : ''))
 const refreshLoadError = computed(() => (groups.value.length ? loadError.value : ''))
 const groupSubmitLabel = computed(() => {
@@ -359,13 +361,16 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="admin-toolbar">
-    <div class="admin-toolbar__intro">
-      <p class="eyebrow">用户组</p>
+  <section class="operations-panel operations-panel--groups">
+    <div class="operations-panel__copy">
       <h1>{{ pageTitle }}</h1>
-      <p class="admin-toolbar__summary">{{ pageSummary }}</p>
+      <div class="operations-panel__chips" aria-label="组管理状态">
+        <span>{{ pageSummary }}</span>
+        <span>{{ isAdmin ? '管理员维护组定义' : canManageAnyGroup ? '组长可维护成员' : '查看所在用户组' }}</span>
+        <span>{{ groups.length }} 个可见组</span>
+      </div>
     </div>
-    <div class="admin-toolbar__actions">
+    <div class="operations-panel__actions">
       <button v-if="isAdmin" class="button" type="button" @click="startCreateGroup">新建用户组</button>
     </div>
   </section>
@@ -373,7 +378,7 @@ onMounted(() => {
   <ListState
     :error="blockingLoadError"
     :loading="loading && !groups.length"
-    :empty="!groups.length"
+    :empty="!canShowGroupWorkspace"
     loading-text="正在加载用户组..."
     :empty-text="isAdmin ? '当前还没有用户组，请先创建。' : '当前还没有加入任何用户组。'"
     @retry="retryLoadPage"
@@ -383,15 +388,39 @@ onMounted(() => {
       <button class="button button--ghost" type="button" @click="retryLoadPage">重试</button>
     </section>
 
-    <section class="group-layout" :class="{ 'is-refreshing': loading }">
-      <section class="admin-panel group-panel">
-        <div class="admin-panel__heading">
-          <p class="eyebrow">组列表</p>
-          <h2>{{ isAdmin ? '全部用户组' : canManageAnyGroup ? '我负责和参与的用户组' : '我参与的用户组' }}</h2>
-          <p>{{ isAdmin ? '管理员可维护组定义并指定组长。' : canManageAnyGroup ? '组长可维护自己负责的组，普通组员可查看自己所在的组。' : '你可以查看自己所在的组和组内成员。' }}</p>
+    <section class="group-workbench" :class="{ 'is-refreshing': loading }">
+      <aside class="group-directory">
+        <div class="group-directory__header">
+          <h2>{{ isAdmin ? '全部用户组' : canManageAnyGroup ? '我负责和参与的组' : '我参与的组' }}</h2>
+          <button
+            v-if="isAdmin"
+            class="button button--ghost button--compact"
+            type="button"
+            @click="startCreateGroup"
+          >
+            新建
+          </button>
         </div>
 
-        <div class="group-list">
+        <div class="group-list group-list--directory">
+          <button
+            v-if="isAdmin"
+            class="group-list__item group-list__item--create"
+            :class="{ 'is-active': isCreatingGroup }"
+            type="button"
+            @click="startCreateGroup"
+          >
+            <div class="group-list__title-row">
+              <strong>创建新组</strong>
+              <span class="status-chip">新建</span>
+            </div>
+            <p>定义组名、说明和组长后，再维护成员。</p>
+          </button>
+
+          <section v-if="!groups.length" class="feedback feedback--inline">
+            当前还没有用户组。
+          </section>
+
           <button
             v-for="group in groups"
             :key="group.id"
@@ -408,17 +437,16 @@ onMounted(() => {
             <small>组长：{{ group.leader_display_name || group.leader_username }}</small>
           </button>
         </div>
-      </section>
+      </aside>
 
-      <section class="group-layout__main">
-        <section v-if="isAdmin" class="admin-panel group-panel">
-          <div class="admin-panel__heading">
-            <p class="eyebrow">组定义</p>
+      <section class="group-workbench__main">
+        <section v-if="isAdmin" class="admin-panel group-panel group-editor-panel">
+          <div class="section-heading">
             <h2>{{ selectedGroup ? '编辑用户组' : '创建用户组' }}</h2>
-            <p>管理员负责组名、组说明和组长任命；成员维护在下方单独处理。</p>
+            <span class="status-chip">{{ selectedGroup ? '组定义' : '新建' }}</span>
           </div>
 
-          <form class="form-card" @submit.prevent="handleGroupSubmit">
+          <form class="form-card form-card--flat group-editor-form" @submit.prevent="handleGroupSubmit">
             <label class="field">
               <span>组名</span>
               <input v-model="form.name" class="text-input" type="text" placeholder="例如：PLM 组" />
@@ -468,18 +496,19 @@ onMounted(() => {
           </form>
         </section>
 
-        <section v-if="selectedGroup" class="admin-panel group-panel">
-          <div class="admin-panel__heading">
-            <p class="eyebrow">{{ canManageSelectedGroup ? '成员维护' : '组成员' }}</p>
-            <h2>{{ selectedGroup.name }}</h2>
-            <p>
-              当前组长：{{ selectedGroupLead }}，当前共有 {{ currentMembers.length }} 位组员。
-              <template v-if="!canManageSelectedGroup">你当前只有查看权限。</template>
-            </p>
-          </div>
-
-          <div v-if="canManageSelectedGroup" class="group-member-actions">
-            <button class="button" type="button" @click="openAddMemberModal">新增组员</button>
+        <section v-if="selectedGroup" class="admin-panel group-panel group-member-panel">
+          <div class="section-heading section-heading--inline">
+            <div>
+              <h2>{{ selectedGroup.name }}</h2>
+              <div class="section-heading__chips">
+                <span class="status-chip">组长：{{ selectedGroupLead }}</span>
+                <span class="status-chip">{{ currentMembers.length }} 位组员</span>
+                <span v-if="!canManageSelectedGroup" class="status-chip">只读</span>
+              </div>
+            </div>
+            <button v-if="canManageSelectedGroup" class="button" type="button" @click="openAddMemberModal">
+              新增组员
+            </button>
           </div>
 
           <section v-if="memberError" class="feedback feedback--error">{{ memberError }}</section>

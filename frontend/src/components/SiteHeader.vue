@@ -58,7 +58,9 @@ async function handleLogout() {
   <header class="site-header">
     <div class="site-header__inner">
       <router-link class="site-header__brand" to="/">
-        <span class="site-header__brand-mark" aria-hidden="true">S</span>
+        <span class="site-header__brand-mark" aria-hidden="true">
+          <img src="/icon-192x192.png" alt="" />
+        </span>
         <span class="site-header__brand-copy">
           <strong>NEXGO Skills</strong>
         </span>
