@@ -388,6 +388,7 @@ def to_admin_skill_detail(skill: Skill, versions: list[SkillVersion]) -> dict[st
 
 def to_public_skill_summary(skill: Skill) -> dict[str, Any]:
     return {
+        "kind": "skill",
         "source": PUBLIC_SOURCE_LOCAL,
         "source_label": PUBLIC_SOURCE_LOCAL_LABEL,
         "slug": skill.name,
@@ -397,6 +398,7 @@ def to_public_skill_summary(skill: Skill) -> dict[str, Any]:
         "installs": None,
         "version": skill.current_version,
         "contributor": skill.contributor,
+        "updated_at": skill.updated_at,
         "scope_type": skill.scope_type,
         "scope_label": build_scope_label(skill),
     }

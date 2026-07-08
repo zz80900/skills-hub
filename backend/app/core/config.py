@@ -7,8 +7,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 INSTALL_COMMAND_TEMPLATE_FIELDS = {"skill_ref", "skill_name"}
 COLLECTION_INSTALL_COMMAND_TEMPLATE_FIELDS = {"collection_ref", "collection_slug", "version"}
-DEFAULT_SKILL_INSTALL_COMMAND_TEMPLATE = "npx nexgo-skills install {skill_ref}"
-DEFAULT_COLLECTION_INSTALL_COMMAND_TEMPLATE = "npx nexgo-skills install collection {collection_ref}"
+DEFAULT_SKILL_INSTALL_COMMAND_TEMPLATE = "npx nexgo-skills@latest install {skill_ref}"
+DEFAULT_COLLECTION_INSTALL_COMMAND_TEMPLATE = "npx nexgo-skills@latest install collection {collection_ref}"
 
 
 class Settings(BaseSettings):

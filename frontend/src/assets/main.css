@@ -1942,12 +1942,20 @@ button:disabled {
   background: #fff9f2;
 }
 
+.skill-card--collection:hover {
+  background: #f2fbf8;
+}
+
 .skill-card__rail {
   width: 4px;
   height: 100%;
   min-height: 120px;
   border-radius: 999px;
   background: var(--accent);
+}
+
+.skill-card--collection .skill-card__rail {
+  background: var(--brand);
 }
 
 .skill-card__content {
@@ -1975,6 +1983,16 @@ button:disabled {
   text-overflow: clip;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.skill-card__type {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.skill-card--collection .skill-card__type {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
 }
 
 .skill-card__description {

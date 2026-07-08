@@ -1058,7 +1058,7 @@ def test_collection_upload_creates_manifest_and_preview(client: TestClient, monk
     assert payload["slug"] == "frontend-basic"
     assert payload["current_version"] == "1.0.0"
     assert payload["item_count"] == 2
-    assert payload["install_command"] == "npx nexgo-skills install collection frontend-basic"
+    assert payload["install_command"] == "npx nexgo-skills@latest install collection frontend-basic"
     assert [item["name"] for item in payload["preview_items"]] == ["code-review", "frontend-design"]
     assert payload["manifest"]["schema_version"] == "nexgo.collection.v1"
     assert payload["manifest"]["package_url"] == "/api/collections/frontend-basic/package?version=1.0.0"
@@ -2352,15 +2352,105 @@ def test_public_local_skills_endpoint_is_local_only(client: TestClient, monkeypa
 
     monkeypatch.setattr(public_api, "search_remote_skills", fake_search_remote_skills)
 
-    create_local_skill(client, monkeypatch, auth_headers(client), name="plm-assistant")
+    headers = auth_headers(client)
+    create_local_skill(client, monkeypatch, headers, name="plm-assistant")
+    create_collection_record(client, monkeypatch, headers, slug="frontend-basic", name="Frontend Basic")
 
     response = client.get("/api/skills/local", params={"q": "local"})
     assert response.status_code == 200
 
     payload = response.json()
-    assert payload["items"][0]["name"] == "plm-assistant"
+    assert [item["name"] for item in payload["items"]] == ["plm-assistant"]
     assert payload["items"][0]["source"] == "local"
+    assert "kind" not in payload["items"][0]
     assert remote_called is False
+
+
+def test_public_local_library_includes_skills_and_collections(client: TestClient, monkeypatch):
+    headers = auth_headers(client)
+    create_local_skill(client, monkeypatch, headers, name="plm-assistant")
+    create_collection_record(client, monkeypatch, headers, slug="frontend-basic", name="Frontend Basic")
+
+    response = client.get("/api/local-library")
+    assert response.status_code == 200
+
+    items = {(item["kind"], item["slug"]): item for item in response.json()["items"]}
+    assert ("skill", "plm-assistant") in items
+    assert ("collection", "frontend-basic") in items
+    assert items[("skill", "plm-assistant")]["source"] == "local"
+    assert items[("skill", "plm-assistant")]["updated_at"] is not None
+    collection = items[("collection", "frontend-basic")]
+    assert collection["source"] == "collection"
+    assert collection["item_count"] == 2
+    assert collection["version"] == "1.0.0"
+    assert collection["install_command"] == "npx nexgo-skills@latest install collection frontend-basic"
+
+
+def test_public_local_library_searches_skills_and_collections(client: TestClient, monkeypatch):
+    headers = auth_headers(client)
+    create_local_skill(
+        client,
+        monkeypatch,
+        headers,
+        name="plm-assistant",
+        description_markdown="local workflow helper",
+    )
+    create_collection_record(
+        client,
+        monkeypatch,
+        headers,
+        slug="frontend-basic",
+        name="Frontend Basic",
+        description_markdown="design collection",
+    )
+
+    collection_response = client.get("/api/local-library", params={"q": "frontend"})
+    assert collection_response.status_code == 200
+    assert [(item["kind"], item["slug"]) for item in collection_response.json()["items"]] == [
+        ("collection", "frontend-basic")
+    ]
+
+    skill_response = client.get("/api/local-library", params={"q": "workflow"})
+    assert skill_response.status_code == 200
+    assert [(item["kind"], item["slug"]) for item in skill_response.json()["items"]] == [
+        ("skill", "plm-assistant")
+    ]
+
+
+def test_public_local_library_hides_unauthorized_collections(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    alice = create_user_account(client, admin_headers, "alice", "alice-pass")
+    bob = create_user_account(client, admin_headers, "bob", "bob-pass")
+    create_user_account(client, admin_headers, "charlie", "charlie-pass")
+
+    group = create_group_record(client, admin_headers, name="Skill 集合组", leader_user_id=alice["id"])
+    alice_headers = auth_headers(client, "alice", "alice-pass")
+    bob_headers = auth_headers(client, "bob", "bob-pass")
+    charlie_headers = auth_headers(client, "charlie", "charlie-pass")
+    replace_group_member_list(client, alice_headers, group_id=group["id"], user_ids=[alice["id"], bob["id"]])
+
+    create_collection_record(
+        client,
+        monkeypatch,
+        alice_headers,
+        slug="team-collection",
+        name="Team Collection",
+        group_id=group["id"],
+    )
+
+    anonymous_response = client.get("/api/local-library")
+    assert anonymous_response.status_code == 200
+    assert anonymous_response.json()["items"] == []
+
+    member_response = client.get("/api/local-library", headers=bob_headers)
+    assert member_response.status_code == 200
+    assert [(item["kind"], item["slug"]) for item in member_response.json()["items"]] == [
+        ("collection", "team-collection")
+    ]
+
+    outsider_response = client.get("/api/local-library", headers=charlie_headers)
+    assert outsider_response.status_code == 200
+    assert outsider_response.json()["items"] == []
 
 
 def test_public_skills_sh_endpoint_returns_remote_only(client: TestClient, monkeypatch):
@@ -2464,6 +2554,21 @@ def test_skill_install_command_template_configures_local_and_remote(monkeypatch)
         )
     finally:
         monkeypatch.delenv("SKILL_INSTALL_COMMAND_TEMPLATE", raising=False)
+        get_settings.cache_clear()
+
+
+def test_skill_install_command_default_uses_latest_npm_package(monkeypatch):
+    monkeypatch.delenv("SKILL_INSTALL_COMMAND_TEMPLATE", raising=False)
+    get_settings.cache_clear()
+
+    try:
+        assert skill_service.get_install_command("demo-skill") == (
+            "npx nexgo-skills@latest install demo-skill"
+        )
+        assert build_remote_install_command("vercel-labs/agent-skills/frontend-design") == (
+            "npx nexgo-skills@latest install vercel-labs/agent-skills/frontend-design"
+        )
+    finally:
         get_settings.cache_clear()
 
 

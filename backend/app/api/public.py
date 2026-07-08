@@ -11,6 +11,11 @@ from app.schemas.collection import (
     PublicCollectionListResponse,
     PublicCollectionSummary,
 )
+from app.schemas.local_library import (
+    PublicLocalLibraryCollectionItem,
+    PublicLocalLibraryResponse,
+    PublicLocalLibrarySkillItem,
+)
 from app.schemas.skill import (
     LocalSkillListResponse,
     PublicConfigResponse,
@@ -63,6 +68,26 @@ def _list_local_skill_summaries(
     ]
 
 
+def _catalog_sort_key(item: PublicLocalLibrarySkillItem | PublicLocalLibraryCollectionItem) -> tuple[str, str, str]:
+    return (item.updated_at.isoformat() if item.updated_at else "", item.kind, item.slug)
+
+
+def _list_local_library_items(
+    session: DbSession,
+    query: str | None,
+    current_user: User | None,
+) -> list[PublicLocalLibrarySkillItem | PublicLocalLibraryCollectionItem]:
+    items: list[PublicLocalLibrarySkillItem | PublicLocalLibraryCollectionItem] = [
+        PublicLocalLibrarySkillItem.model_validate(to_local_public_skill_summary(skill))
+        for skill in search_public_skills(session, query, current_user)
+    ]
+    items.extend(
+        PublicLocalLibraryCollectionItem.model_validate(to_public_collection_summary(collection))
+        for collection in search_public_collections(session, query, current_user)
+    )
+    return sorted(items, key=_catalog_sort_key, reverse=True)
+
+
 async def _list_remote_skill_summaries(
     query: str | None,
     page: int,
@@ -93,6 +118,15 @@ async def _list_remote_skill_summaries(
 async def get_public_config():
     settings = get_settings()
     return PublicConfigResponse(cli_install_command=settings.cli_install_command)
+
+
+@router.get("/local-library", response_model=PublicLocalLibraryResponse)
+async def list_local_library(
+    session: DbSession,
+    current_user: User | None = Depends(get_optional_current_user),
+    q: str | None = Query(default=None, description="搜索关键词"),
+):
+    return PublicLocalLibraryResponse(items=_list_local_library_items(session, q, current_user))
 
 
 @router.get("/skills/local", response_model=LocalSkillListResponse)

@@ -13,7 +13,7 @@
 - 普通用户登录后仅能查看和操作自己上传的 Skill，管理员可查看全部 Skill 并看到逻辑删除状态
 - 工作台支持创建 Skill、上传 ZIP、升级同名 Skill 和逻辑删除
 - 工作台支持上传 Skill 集合 ZIP，自动识别根目录一级 Skill 目录并生成 Skill 集合 manifest
-- Skill 集合详情提供 `npx nexgo-skills install collection <slug>` 安装命令，CLI 会按目标 Agent 目录批量安装并失败回滚
+- Skill 集合详情提供 `npx nexgo-skills@latest install collection <slug>` 安装命令，CLI 会按目标 Agent 目录批量安装并失败回滚
 - 上传 Skill ZIP 时校验根目录必须包含非空 `SKILL.md`，可选 `cmd` 只作为普通包内容保存
 - ZIP 上传到私有 Nexus `raw-repo/skills/{name}.zip`
 
@@ -58,10 +58,10 @@ frontend-basic.zip
 默认安装命令：
 
 ```powershell
-npx nexgo-skills install collection frontend-basic
-npx nexgo-skills install collection frontend-basic --target codex
-npx nexgo-skills install collection frontend-basic --target claude-code
-npx nexgo-skills install collection frontend-basic --dry-run --json
+npx nexgo-skills@latest install collection frontend-basic
+npx nexgo-skills@latest install collection frontend-basic --agent codex
+npx nexgo-skills@latest install collection frontend-basic --agent claude
+npx nexgo-skills@latest install collection frontend-basic --dry-run --json
 ```
 
 CLI 会先获取 Skill 集合 manifest，再下载 ZIP 并校验每个 Skill checksum。安装写入目标 Agent 的 Skill 目录；若任意步骤失败，会删除本次新增目录并恢复被覆盖目录。

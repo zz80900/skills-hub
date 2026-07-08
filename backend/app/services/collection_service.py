@@ -543,6 +543,7 @@ def to_collection_detail(collection: SkillCollection, snapshots: list[SkillColle
 
 def to_public_collection_summary(collection: SkillCollection) -> dict[str, Any]:
     return {
+        "kind": "collection",
         "source": PUBLIC_SOURCE_COLLECTION,
         "source_label": PUBLIC_SOURCE_COLLECTION_LABEL,
         "slug": collection.slug,

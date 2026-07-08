@@ -5,8 +5,9 @@ import { useRoute, useRouter } from 'vue-router'
 import SiteHeader from '../../components/SiteHeader.vue'
 import SkillCard from '../../components/SkillCard.vue'
 import SkillDetailModal from '../../components/SkillDetailModal.vue'
+import CollectionDetailModal from '../../components/CollectionDetailModal.vue'
 import ListState from '../../components/ListState.vue'
-import { fetchLocalSkills, fetchRemoteSkills, fetchSkill } from '../../services/api'
+import { fetchCollection, fetchLocalLibrary, fetchRemoteSkills, fetchSkill } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,18 +17,22 @@ const remoteLoadingMore = ref(false)
 const error = ref('')
 const remoteError = ref('')
 const search = ref('')
-const localSkills = ref([])
+const localItems = ref([])
 const remoteSkills = ref([])
-const detailLoading = ref(false)
-const detailError = ref('')
+const skillDetailLoading = ref(false)
+const skillDetailError = ref('')
+const collectionDetailLoading = ref(false)
+const collectionDetailError = ref('')
 const selectedSkill = ref(null)
+const selectedCollection = ref(null)
 const remotePage = ref(1)
 const remotePageSize = ref(12)
 const remoteHasMore = ref(false)
 const remoteSentinel = ref(null)
 const showBackToTop = ref(false)
 let searchTimer = null
-let detailRequestId = 0
+let skillDetailRequestId = 0
+let collectionDetailRequestId = 0
 let localRequestId = 0
 let remoteRequestId = 0
 let remoteObserver = null
@@ -40,12 +45,13 @@ const libraryTabs = [
 const activeLibraryTab = computed(() =>
   libraryTabs.some((tab) => tab.key === route.query.tab) ? route.query.tab : 'local',
 )
-const isSkillModalOpen = computed(() => Boolean(route.query.skill))
+const isSkillModalOpen = computed(() => Boolean(route.query.skill) && !route.query.collection)
+const isCollectionModalOpen = computed(() => Boolean(route.query.collection))
 const activeDetailSource = computed(() =>
   typeof route.query.source === 'string' && route.query.source ? route.query.source : 'local',
 )
 const localTabSummary = computed(() =>
-  search.value ? `匹配 ${localSkills.value.length} 个结果` : `当前共 ${localSkills.value.length} 个 Skill`,
+  search.value ? `匹配 ${localItems.value.length} 个结果` : `当前共 ${localItems.value.length} 个本地资产`,
 )
 const remoteTabSummary = computed(() => {
   if (search.value) {
@@ -56,14 +62,14 @@ const remoteTabSummary = computed(() => {
 const activeLibraryLabel = computed(() =>
   libraryTabs.find((tab) => tab.key === activeLibraryTab.value)?.label || '本地库',
 )
-const activeSkills = computed(() => (activeLibraryTab.value === 'local' ? localSkills.value : remoteSkills.value))
+const activeItems = computed(() => (activeLibraryTab.value === 'local' ? localItems.value : remoteSkills.value))
 const activeSummary = computed(() => (activeLibraryTab.value === 'local' ? localTabSummary.value : remoteTabSummary.value))
 const activeLoading = computed(() => (activeLibraryTab.value === 'local' ? localLoading.value : remoteLoading.value))
 const activeLoadingText = computed(() => (activeLibraryTab.value === 'local' ? '正在加载本地库...' : '正在加载 skills.sh...'))
 const activeError = computed(() => (activeLibraryTab.value === 'local' ? error.value : remoteError.value))
 const activeEmptyText = computed(() => {
   if (activeLibraryTab.value === 'local') {
-    return search.value ? `本地库没有找到与“${search.value}”匹配的 Skill。` : '本地库当前还没有 Skill。'
+    return search.value ? `本地库没有找到与“${search.value}”匹配的资产。` : '本地库当前还没有 Skill 或 Skill 集合。'
   }
   return search.value ? `skills.sh 没有找到与“${search.value}”匹配的 Skill。` : '当前未获取到 skills.sh Skill。'
 })
@@ -72,7 +78,7 @@ const sourcePanels = computed(() => [
     key: 'local',
     label: '本地库',
     title: '内部资产',
-    count: localSkills.value.length,
+    count: localItems.value.length,
     summary: localLoading.value ? '正在加载本地库' : error.value ? '加载失败' : localTabSummary.value,
     loading: localLoading.value,
     error: error.value,
@@ -112,18 +118,18 @@ function mergeRemoteSkills(items) {
   remoteSkills.value = merged
 }
 
-async function loadLocalSkills(keyword = '') {
+async function loadLocalLibrary(keyword = '') {
   const requestId = localRequestId + 1
   localRequestId = requestId
   localLoading.value = true
   error.value = ''
 
   try {
-    const payload = await fetchLocalSkills(keyword)
+    const payload = await fetchLocalLibrary(keyword)
     if (requestId !== localRequestId) {
       return
     }
-    localSkills.value = payload.items || []
+    localItems.value = payload.items || []
   } catch (err) {
     if (requestId !== localRequestId) {
       return
@@ -182,8 +188,8 @@ async function loadRemoteSkills(keyword = '', options = {}) {
   }
 }
 
-function refreshSkillLists(keyword = '') {
-  loadLocalSkills(keyword)
+function refreshLibraryLists(keyword = '') {
+  loadLocalLibrary(keyword)
   loadRemoteSkills(keyword, { page: 1 })
 }
 
@@ -195,25 +201,49 @@ async function loadMoreRemoteSkills() {
 }
 
 async function loadSkillDetail(source, slug) {
-  const requestId = detailRequestId + 1
-  detailRequestId = requestId
-  detailLoading.value = true
-  detailError.value = ''
+  const requestId = skillDetailRequestId + 1
+  skillDetailRequestId = requestId
+  skillDetailLoading.value = true
+  skillDetailError.value = ''
   try {
     const payload = await fetchSkill(source, slug)
-    if (detailRequestId !== requestId) {
+    if (skillDetailRequestId !== requestId) {
       return
     }
     selectedSkill.value = payload
   } catch (err) {
-    if (detailRequestId !== requestId) {
+    if (skillDetailRequestId !== requestId) {
       return
     }
-    detailError.value = err.message
+    skillDetailError.value = err.message
     selectedSkill.value = null
   } finally {
-    if (detailRequestId === requestId) {
-      detailLoading.value = false
+    if (skillDetailRequestId === requestId) {
+      skillDetailLoading.value = false
+    }
+  }
+}
+
+async function loadCollectionDetail(slug) {
+  const requestId = collectionDetailRequestId + 1
+  collectionDetailRequestId = requestId
+  collectionDetailLoading.value = true
+  collectionDetailError.value = ''
+  try {
+    const payload = await fetchCollection(slug)
+    if (collectionDetailRequestId !== requestId) {
+      return
+    }
+    selectedCollection.value = payload
+  } catch (err) {
+    if (collectionDetailRequestId !== requestId) {
+      return
+    }
+    collectionDetailError.value = err.message
+    selectedCollection.value = null
+  } finally {
+    if (collectionDetailRequestId === requestId) {
+      collectionDetailLoading.value = false
     }
   }
 }
@@ -232,25 +262,47 @@ function clearSearch() {
   search.value = ''
 }
 
-function retryLoadSkills() {
+function retryLoadItems() {
   if (activeLibraryTab.value === 'skills_sh') {
     loadRemoteSkills(search.value, { page: 1 })
     return
   }
-  loadLocalSkills(search.value)
+  loadLocalLibrary(search.value)
 }
 
 function openSkillDetail(skill) {
   router.replace({
     name: 'home',
-    query: buildHomeQuery({ skill: skill.slug, source: skill.source, version: null }),
+    query: buildHomeQuery({ skill: skill.slug, source: skill.source, collection: null, version: null }),
   })
+}
+
+function openCollectionDetail(collection) {
+  router.replace({
+    name: 'home',
+    query: buildHomeQuery({ collection: collection.slug, skill: null, source: null, version: null }),
+  })
+}
+
+function openCatalogItemDetail(item) {
+  if (item.kind === 'collection') {
+    openCollectionDetail(item)
+    return
+  }
+  openSkillDetail(item)
 }
 
 function closeSkillDetail() {
   router.replace({
     name: 'home',
     query: buildHomeQuery({ skill: null, source: null, version: null }),
+  })
+}
+
+function closeCollectionDetail() {
+  router.replace({
+    name: 'home',
+    query: buildHomeQuery({ collection: null }),
   })
 }
 
@@ -297,7 +349,7 @@ async function syncRemoteObserver() {
 watch(search, (value) => {
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => {
-    refreshSkillLists(value)
+    refreshLibraryLists(value)
   }, 250)
 })
 
@@ -308,10 +360,25 @@ watch(
       loadSkillDetail(typeof source === 'string' && source ? source : 'local', slug)
       return
     }
-    detailRequestId += 1
-    detailLoading.value = false
-    detailError.value = ''
+    skillDetailRequestId += 1
+    skillDetailLoading.value = false
+    skillDetailError.value = ''
     selectedSkill.value = null
+  },
+  { immediate: true },
+)
+
+watch(
+  () => route.query.collection,
+  (slug) => {
+    if (typeof slug === 'string' && slug) {
+      loadCollectionDetail(slug)
+      return
+    }
+    collectionDetailRequestId += 1
+    collectionDetailLoading.value = false
+    collectionDetailError.value = ''
+    selectedCollection.value = null
   },
   { immediate: true },
 )
@@ -324,7 +391,7 @@ watch(
 )
 
 onMounted(() => {
-  refreshSkillLists('')
+  refreshLibraryLists('')
   handleWindowScroll()
   window.addEventListener('scroll', handleWindowScroll, { passive: true })
 })
@@ -343,13 +410,13 @@ onBeforeUnmount(() => {
       <section class="library-console">
         <div class="library-console__intro">
           <h1 class="library-title">Skill 目录</h1>
-          <div class="library-console__meta" aria-label="Skill 来源状态">
+          <div class="library-console__meta" aria-label="目录来源状态">
             <span>{{ localTabSummary }}</span>
             <span>{{ remoteTabSummary }}</span>
           </div>
         </div>
 
-        <div class="source-card-list" role="tablist" aria-label="Skill 来源切换">
+        <div class="source-card-list" role="tablist" aria-label="目录来源切换">
           <button
             v-for="panel in sourcePanels"
             :key="panel.key"
@@ -391,7 +458,7 @@ onBeforeUnmount(() => {
               v-model.trim="search"
               class="text-input"
               type="search"
-              placeholder="搜索 Skill、作者或用途"
+              placeholder="搜索 Skill、集合、作者或用途"
             />
             <button
               v-if="search"
@@ -416,26 +483,26 @@ onBeforeUnmount(() => {
 
         <ListState
           :error="activeError"
-          :loading="activeLoading && !activeSkills.length"
-          :empty="!activeSkills.length"
+          :loading="activeLoading && !activeItems.length"
+          :empty="!activeItems.length"
           :empty-text="activeEmptyText"
           :loading-text="activeLoadingText"
-          @retry="retryLoadSkills"
+          @retry="retryLoadItems"
         >
           <section
             class="skills-grid skills-grid--directory"
-            :class="{ 'is-refreshing': activeLoading && activeSkills.length }"
+            :class="{ 'is-refreshing': activeLoading && activeItems.length }"
           >
             <SkillCard
-              v-for="skill in activeSkills"
-              :key="`${skill.source}:${skill.slug}`"
-              :skill="skill"
-              @select="openSkillDetail"
+              v-for="item in activeItems"
+              :key="`${item.kind || 'skill'}:${item.source}:${item.slug}`"
+              :skill="item"
+              @select="openCatalogItemDetail"
             />
           </section>
 
           <div
-            v-if="activeLibraryTab === 'skills_sh' && activeSkills.length && !remoteLoading && (remoteHasMore || remoteLoadingMore)"
+            v-if="activeLibraryTab === 'skills_sh' && activeItems.length && !remoteLoading && (remoteHasMore || remoteLoadingMore)"
             ref="remoteSentinel"
             class="skills-waterfall-status"
           >
@@ -446,11 +513,18 @@ onBeforeUnmount(() => {
     </main>
     <SkillDetailModal
       :open="isSkillModalOpen"
-      :loading="detailLoading"
-      :error="detailError"
+      :loading="skillDetailLoading"
+      :error="skillDetailError"
       :skill="selectedSkill"
       :source="activeDetailSource"
       @close="closeSkillDetail"
+    />
+    <CollectionDetailModal
+      :open="isCollectionModalOpen"
+      :loading="collectionDetailLoading"
+      :error="collectionDetailError"
+      :collection="selectedCollection"
+      @close="closeCollectionDetail"
     />
     <transition name="back-to-top-fade">
       <button

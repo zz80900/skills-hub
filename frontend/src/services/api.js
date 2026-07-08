@@ -220,6 +220,15 @@ function normalizeCollectionPayload(payload) {
   return normalized
 }
 
+function normalizeLocalLibraryItem(payload) {
+  const kind = payload?.kind === 'collection' || payload?.source === 'collection' ? 'collection' : 'skill'
+  const normalized = kind === 'collection' ? normalizeCollectionPayload(payload) : normalizeSkillPayload(payload)
+  return {
+    ...normalized,
+    kind,
+  }
+}
+
 function getRequestHeaders(options, includeAuth) {
   const headers = new Headers(options.headers || {})
   if (includeAuth && authState.token) {
@@ -234,7 +243,7 @@ function shouldRedirectHomeAfterAuthFailure() {
     return true
   }
   const params = new URLSearchParams(location.search)
-  return ['skill', 'source', 'version'].some((key) => params.has(key))
+  return ['skill', 'source', 'version', 'collection'].some((key) => params.has(key))
 }
 
 function redirectToHome() {
@@ -385,6 +394,16 @@ export async function fetchLocalSkills(query) {
   return {
     ...payload,
     items: (payload.items || []).map(normalizeSkillPayload),
+  }
+}
+
+export async function fetchLocalLibrary(query) {
+  const payload = await request(buildUrl('/api/local-library', { q: query }), {
+    authMode: AUTH_MODE_OPTIONAL,
+  })
+  return {
+    ...payload,
+    items: (payload.items || []).map(normalizeLocalLibraryItem),
   }
 }
 

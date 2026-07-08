@@ -18,7 +18,8 @@ cp ".env.example" ".env"
 
 说明：
 
-- Docker 部署只会读取当前目录下的 `deploy/.env`
+- Docker Compose 会读取当前目录下的 `deploy/.env`，并通过 `env_file` 注入到 app 容器
+- 新增后端环境变量时，通常只需要写入 `deploy/.env`，不需要同步修改 `environment` 映射
 - `backend/.env` 已被 [.dockerignore](/E:/code_ai/nexgo-skills-lib/.dockerignore) 排除，不会打进镜像，也不会被容器内的 FastAPI 自动读取
 - 如果你把 AD 配置只写在 `backend/.env`，登录时仍会返回 `AD 认证服务暂不可用`
 
@@ -39,8 +40,8 @@ NEXUS_USERNAME=your-nexus-username
 NEXUS_PASSWORD=your-nexus-password
 CORS_ORIGINS=http://localhost:8000
 CLI_INSTALL_COMMAND=npx nexgo-skills --help
-SKILL_INSTALL_COMMAND_TEMPLATE=npx nexgo-skills install {skill_ref}
-COLLECTION_INSTALL_COMMAND_TEMPLATE=npx nexgo-skills install collection {collection_ref}
+SKILL_INSTALL_COMMAND_TEMPLATE=npx nexgo-skills@latest install {skill_ref}
+COLLECTION_INSTALL_COMMAND_TEMPLATE=npx nexgo-skills@latest install collection {collection_ref}
 ```
 
 AD 配置最小示例：
@@ -63,7 +64,7 @@ AD_LDAP_BIND_PRINCIPAL=nexgo-skills@XGD.COM
 - `AD_ENABLED` 必须为 `true`
 - `AD_REALM`、`AD_KDC`、`AD_LDAP_URL`、`AD_BASE_DN`、`AD_LDAP_BIND_USERNAME`、`AD_LDAP_BIND_PASSWORD` 任一缺失，后端会直接返回 503
 - `AD_DOMAIN_ROOT_DN` 可留空，程序会按 `AD_REALM` 自动推导，例如 `XGD.COM -> DC=xgd,DC=com`
-- 修改 `deploy/.env` 后需要重新执行 `docker compose up -d`
+- 修改 `deploy/.env` 后需要重新创建 app 容器，后端启动后会缓存配置
 
 ## 启动
 
