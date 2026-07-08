@@ -15,6 +15,8 @@ const sourceLabel = computed(() =>
   props.skill.source_label || (props.skill.source === 'skills_sh' ? 'skills.sh' : '本地库'),
 )
 const itemKindLabel = computed(() => (isCollection.value ? 'Skill 集合' : 'Skill'))
+const showSourceLabel = computed(() => sourceLabel.value && sourceLabel.value !== itemKindLabel.value)
+const showVersion = computed(() => Boolean(props.skill.version))
 const detailMetric = computed(() => {
   if (isCollection.value) {
     return `包含 ${Number(props.skill.item_count) || 0} 个 Skill`
@@ -37,8 +39,8 @@ const detailMetric = computed(() => {
     <div class="skill-card__content">
       <div class="skill-card__meta-row">
         <span class="skill-card__meta skill-card__type">{{ itemKindLabel }}</span>
-        <span class="skill-card__meta">{{ sourceLabel }}</span>
-        <span v-if="skill.version" class="skill-card__version">{{ skill.version }}</span>
+        <span v-if="showSourceLabel" class="skill-card__meta">{{ sourceLabel }}</span>
+        <span v-if="showVersion" class="skill-card__version">{{ skill.version }}</span>
         <span v-if="detailMetric" class="skill-card__badge">{{ detailMetric }}</span>
       </div>
       <span class="skill-card__name-text">{{ skill.name }}</span>

@@ -28,7 +28,7 @@ from app.db.base import Base
 from app.db.schema import _ensure_postgresql_skill_name_uniqueness_policy, ensure_schema_compatibility
 from app.db.session import engine
 from app.main import app
-from app.services import skill_service, user_service
+from app.services import collection_service, skill_service, user_service
 from app.services.ad_auth import ActiveDirectoryIdentity, ActiveDirectoryUnavailableError
 from app.services import nexus as nexus_service
 from app.services.skills_registry import RegistrySkillDetail, RegistrySkillSummary, build_remote_install_command
@@ -2554,6 +2554,40 @@ def test_skill_install_command_template_configures_local_and_remote(monkeypatch)
         )
     finally:
         monkeypatch.delenv("SKILL_INSTALL_COMMAND_TEMPLATE", raising=False)
+        get_settings.cache_clear()
+
+
+def test_collection_install_command_template_configures_collection_responses(client: TestClient, monkeypatch):
+    monkeypatch.setenv(
+        "COLLECTION_INSTALL_COMMAND_TEMPLATE",
+        "internal-collection install {collection_ref} --slug {collection_slug} --version {version}",
+    )
+    get_settings.cache_clear()
+
+    try:
+        assert collection_service.get_collection_install_command("frontend-basic", "1.0.0") == (
+            "internal-collection install frontend-basic --slug frontend-basic --version 1.0.0"
+        )
+
+        headers = auth_headers(client)
+        create_response = create_collection_record(client, monkeypatch, headers)
+        expected_command = "internal-collection install frontend-basic --slug frontend-basic --version 1.0.0"
+        assert create_response.json()["install_command"] == expected_command
+
+        public_list = client.get("/api/collections")
+        assert public_list.status_code == 200
+        assert public_list.json()["items"][0]["install_command"] == expected_command
+
+        public_detail = client.get("/api/collections/frontend-basic")
+        assert public_detail.status_code == 200
+        assert public_detail.json()["install_command"] == expected_command
+
+        local_library = client.get("/api/local-library")
+        assert local_library.status_code == 200
+        collection_items = [item for item in local_library.json()["items"] if item["kind"] == "collection"]
+        assert collection_items[0]["install_command"] == expected_command
+    finally:
+        monkeypatch.delenv("COLLECTION_INSTALL_COMMAND_TEMPLATE", raising=False)
         get_settings.cache_clear()
 
 

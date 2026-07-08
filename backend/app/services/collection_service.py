@@ -513,7 +513,7 @@ def to_collection_summary(collection: SkillCollection) -> dict[str, Any]:
         "item_count": collection.item_count,
         "contributor": collection.contributor,
         "description_html": collection.description_html,
-        "install_command": get_collection_install_command(collection.slug),
+        "install_command": get_collection_install_command(collection.slug, collection.current_version),
         "is_deleted": collection.deleted_at is not None,
         "deleted_at": collection.deleted_at,
         "created_at": collection.created_at,
@@ -549,7 +549,7 @@ def to_public_collection_summary(collection: SkillCollection) -> dict[str, Any]:
         "slug": collection.slug,
         "name": collection.name,
         "description_html": collection.description_html,
-        "install_command": get_collection_install_command(collection.slug),
+        "install_command": get_collection_install_command(collection.slug, collection.current_version),
         "version": collection.current_version,
         "contributor": collection.contributor,
         "item_count": collection.item_count,
@@ -573,7 +573,7 @@ def to_collection_install_metadata(collection: SkillCollection) -> dict[str, Any
     return {
         "slug": collection.slug,
         "version": collection.current_version,
-        "install_command": get_collection_install_command(collection.slug),
+        "install_command": get_collection_install_command(collection.slug, collection.current_version),
         "manifest_url": build_collection_manifest_endpoint(collection.slug),
         "package_url": build_collection_package_endpoint(collection.slug),
     }
