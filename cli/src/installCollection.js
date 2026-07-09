@@ -12,6 +12,7 @@ import {
   writeJsonFile,
   writeSkillDirectory,
 } from './files.js'
+import { normalizeRegistryUrl } from './registry.js'
 import { verifyPackageAgainstManifest } from './zip.js'
 
 export async function installCollection(options) {
@@ -220,9 +221,4 @@ function buildManifestUrl(registry, slug, version) {
 
 function resolveRegistryUrl(registry, value) {
   return new URL(value, normalizeRegistryUrl(registry)).toString()
-}
-
-function normalizeRegistryUrl(registry) {
-  const normalized = String(registry || '').trim() || 'http://localhost:8000'
-  return normalized.endsWith('/') ? normalized : `${normalized}/`
 }

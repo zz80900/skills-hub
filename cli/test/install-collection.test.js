@@ -6,8 +6,24 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { resolveTargetAdapter } from '../src/adapters.js'
+import { parseArgs } from '../src/args.js'
 import { commitPlan, installCollection } from '../src/installCollection.js'
 import { checksumSkillFiles, parseCollectionZip, verifyPackageAgainstManifest } from '../src/zip.js'
+
+test('默认使用线上 Skill 集合服务地址', () => {
+  const originalRegistry = process.env.NEXGO_SKILLS_REGISTRY
+  delete process.env.NEXGO_SKILLS_REGISTRY
+  try {
+    const options = parseArgs(['install', 'collection', 'demo'])
+    assert.equal(options.registry, 'https://skills.nexgoglobal.com')
+  } finally {
+    if (originalRegistry === undefined) {
+      delete process.env.NEXGO_SKILLS_REGISTRY
+    } else {
+      process.env.NEXGO_SKILLS_REGISTRY = originalRegistry
+    }
+  }
+})
 
 test('解析 Skill 集合 ZIP 并把 cmd 当作普通内容', () => {
   const zip = makeZip({
@@ -21,6 +37,16 @@ test('解析 Skill 集合 ZIP 并把 cmd 当作普通内容', () => {
   assert.equal(parsed.items[0].name, 'alpha')
   assert.equal(parsed.items[0].fileCount, 3)
   assert.ok(parsed.items[0].sha256)
+})
+
+test('checksum 排序与后端 manifest 生成保持一致', () => {
+  assert.equal(
+    checksumSkillFiles([
+      { path: 'cmd', content: Buffer.from('echo ordinary') },
+      { path: 'SKILL.md', content: Buffer.from('# alpha') },
+    ]),
+    'b5ae4ae431fb4aaafc6990caca91773c95995f5486185a6bc4b3eeeb293b9f0a',
+  )
 })
 
 test('manifest checksum 不匹配时拒绝安装包', () => {

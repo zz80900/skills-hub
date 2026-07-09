@@ -1,4 +1,5 @@
 import { CliError } from './errors.js'
+import { DEFAULT_REGISTRY } from './registry.js'
 
 const VALUE_FLAGS = new Set(['--target', '--registry', '--token', '--version'])
 const BOOLEAN_FLAGS = new Set(['--dry-run', '--json', '--force'])
@@ -14,7 +15,7 @@ export function parseArgs(argv) {
     subject,
     slug,
     target: 'codex',
-    registry: process.env.NEXGO_SKILLS_REGISTRY || 'http://localhost:8000',
+    registry: process.env.NEXGO_SKILLS_REGISTRY || DEFAULT_REGISTRY,
     token: process.env.NEXGO_SKILLS_TOKEN || '',
     version: '',
     dryRun: false,

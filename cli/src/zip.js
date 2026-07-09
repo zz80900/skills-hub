@@ -9,13 +9,19 @@ const LOCAL_SIGNATURE = 0x04034b50
 
 export function checksumSkillFiles(files) {
   const hash = crypto.createHash('sha256')
-  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+  for (const file of [...files].sort((a, b) => compareArchivePath(a.path, b.path))) {
     hash.update(file.path, 'utf8')
     hash.update(Buffer.from([0]))
     hash.update(file.content)
     hash.update(Buffer.from([0]))
   }
   return hash.digest('hex')
+}
+
+function compareArchivePath(left, right) {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
 }
 
 export function parseCollectionZip(buffer) {
