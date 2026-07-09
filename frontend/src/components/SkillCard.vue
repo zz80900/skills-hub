@@ -46,6 +46,5 @@ const detailMetric = computed(() => {
       <span class="skill-card__name-text">{{ skill.name }}</span>
       <div class="skill-card__description" v-html="skill.description_html"></div>
     </div>
-    <span class="skill-card__action">打开</span>
   </button>
 </template>

@@ -9,6 +9,10 @@ import SkillDetailView from '../views/admin/SkillDetailView.vue'
 import SkillFormView from '../views/admin/SkillFormView.vue'
 import HomeView from '../views/public/HomeView.vue'
 
+function isSamePathQueryNavigation(to, from) {
+  return to.path === from.path && to.hash === from.hash
+}
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -87,7 +91,13 @@ const router = createRouter({
     { path: '/admin/collections/:slug', redirect: (to) => `/workspace/collections/${to.params.slug}` },
     { path: '/admin/collections', redirect: '/workspace/collections' },
   ],
-  scrollBehavior() {
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) {
+      return savedPosition
+    }
+    if (isSamePathQueryNavigation(to, from)) {
+      return false
+    }
     return { top: 0 }
   },
 })

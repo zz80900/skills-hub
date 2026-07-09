@@ -1930,7 +1930,7 @@ button:disabled {
 
 .skill-card {
   position: relative;
-  grid-template-columns: 4px minmax(0, 1fr) auto;
+  grid-template-columns: 4px minmax(0, 1fr);
   align-items: start;
   gap: 16px;
   padding: 18px;
@@ -2000,20 +2000,6 @@ button:disabled {
   color: var(--text-soft);
   font-size: 0.94rem;
   line-height: 1.6;
-}
-
-.skill-card__action {
-  align-self: start;
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--brand-strong);
-  font-size: 0.86rem;
-  font-weight: 700;
 }
 
 .detail-drawer {
@@ -3046,11 +3032,6 @@ button:disabled {
 
   .skill-card {
     grid-template-columns: 4px minmax(0, 1fr);
-  }
-
-  .skill-card__action {
-    grid-column: 2;
-    justify-self: start;
   }
 
   .detail-drawer__panel {
