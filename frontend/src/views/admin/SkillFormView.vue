@@ -13,8 +13,10 @@ const isAdmin = computed(() => authState.user?.role === 'ADMIN')
 const loading = ref(false)
 const submitting = ref(false)
 const error = ref('')
-const selectedFileName = ref('')
 const fileError = ref('')
+const fileInput = ref(null)
+const isDraggingFile = ref(false)
+const dragDepth = ref(0)
 const currentVersion = ref('')
 const showZipGuidance = ref(false)
 const groupOptionsLoading = ref(false)
@@ -43,6 +45,11 @@ const form = reactive({
 const selectedOrganization = computed(() =>
   organizationOptions.value.find((item) => item.path === form.scope_org_path) || null,
 )
+const selectedGroup = computed(() =>
+  groupOptions.value.find((item) => String(item.id) === form.group_id) || null,
+)
+const selectedFileName = computed(() => form.zip_file?.name || '')
+const selectedFileSize = computed(() => form.zip_file ? formatFileSize(form.zip_file.size) : '')
 const selectedScopeOption = computed(() =>
   scopeOptions.find((option) => option.value === form.scope_type) || scopeOptions[0],
 )
@@ -54,6 +61,20 @@ const selectedScopeHelp = computed(() => {
     return '所选组织及子组织成员可见。'
   }
   return '所有已登录用户均可发现。'
+})
+const scopeSummary = computed(() => {
+  if (form.scope_type === 'GROUP') {
+    return selectedGroup.value
+      ? `归属组可见 · ${selectedGroup.value.name}`
+      : '归属组可见 · 待选择归属组'
+  }
+  if (form.scope_type === 'ORGANIZATION') {
+    const organizationLabel = form.scope_org_path || form.scope_org_name
+    return organizationLabel
+      ? `归属组织可见 · ${organizationLabel}`
+      : '归属组织可见 · 待选择归属组织'
+  }
+  return '公开可见'
 })
 const isNameReady = computed(() => {
   const normalizedName = form.name.trim()
@@ -100,15 +121,93 @@ const submitHint = computed(() => {
   return '创建成功后会进入 Skill 详情页。'
 })
 
-function onFileChange(event) {
-  const [file] = event.target.files || []
-  fileError.value = ''
-  form.zip_file = file || null
-  selectedFileName.value = file?.name || ''
-  if (file && !file.name.toLowerCase().endsWith('.zip')) {
-    fileError.value = '请上传 ZIP 压缩包'
-    form.zip_file = null
+function formatFileSize(bytes) {
+  if (bytes < 1024) {
+    return `${bytes} B`
   }
+  const units = ['KB', 'MB', 'GB']
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)) - 1, units.length - 1)
+  const value = bytes / (1024 ** (unitIndex + 1))
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`
+}
+
+function setFileError(message) {
+  fileError.value = form.zip_file ? `${message}，原文件已保留。` : message
+}
+
+function receiveZipFiles(fileList) {
+  const files = Array.from(fileList || [])
+  if (!files.length) {
+    return false
+  }
+  if (files.length !== 1) {
+    setFileError('一次只能上传一个 ZIP 压缩包')
+    return false
+  }
+
+  const [file] = files
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    setFileError('只支持 ZIP 压缩包')
+    return false
+  }
+  if (file.size === 0) {
+    setFileError('ZIP 文件不能为空')
+    return false
+  }
+
+  form.zip_file = file
+  fileError.value = ''
+  return true
+}
+
+function resetNativeFileInput() {
+  if (fileInput.value) {
+    fileInput.value.value = ''
+  }
+}
+
+function onFileChange(event) {
+  receiveZipFiles(event.target.files)
+  resetNativeFileInput()
+}
+
+function onFileDragEnter(event) {
+  if (!Array.from(event.dataTransfer?.types || []).includes('Files')) {
+    return
+  }
+  dragDepth.value += 1
+  isDraggingFile.value = true
+}
+
+function onFileDragOver(event) {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onFileDragLeave() {
+  dragDepth.value = Math.max(0, dragDepth.value - 1)
+  if (dragDepth.value === 0) {
+    isDraggingFile.value = false
+  }
+}
+
+function onFileDrop(event) {
+  dragDepth.value = 0
+  isDraggingFile.value = false
+  receiveZipFiles(event.dataTransfer?.files)
+}
+
+function replaceSelectedFile() {
+  fileInput.value?.click()
+}
+
+function removeSelectedFile() {
+  form.zip_file = null
+  fileError.value = ''
+  dragDepth.value = 0
+  isDraggingFile.value = false
+  resetNativeFileInput()
 }
 
 function toggleZipGuidance() {
@@ -271,7 +370,9 @@ async function handleSubmit() {
       router.push(`/workspace/skills/${createdSkill.name}`)
     }
   } catch (err) {
-    error.value = err.message
+    if (!fileError.value || fileError.value !== err.message) {
+      error.value = err.message
+    }
   } finally {
     submitting.value = false
   }
@@ -359,16 +460,59 @@ watch(
                 </ul>
               </section>
 
-              <label class="upload-dropzone upload-dropzone--large" for="skill-zip-file">
-                <input id="skill-zip-file" class="upload-dropzone__input" type="file" accept=".zip" @change="onFileChange" />
-                <span class="upload-dropzone__title">
-                  {{ selectedFileName || (isEditMode ? '选择新版本包' : '选择 ZIP 包') }}
-                </span>
-                <span class="upload-dropzone__hint">
-                  {{ selectedFileName ? '提交时会上传处理。' : isEditMode ? '不选择则沿用当前版本。' : '支持 .zip 文件。' }}
-                </span>
-              </label>
-              <small v-if="fileError" class="feedback feedback--error feedback--inline">{{ fileError }}</small>
+              <div
+                class="upload-dropzone upload-dropzone--large"
+                :class="{
+                  'upload-dropzone--dragging': isDraggingFile,
+                  'upload-dropzone--selected': selectedFileName,
+                }"
+                @dragenter.prevent="onFileDragEnter"
+                @dragover.prevent="onFileDragOver"
+                @dragleave.prevent="onFileDragLeave"
+                @drop.prevent="onFileDrop"
+              >
+                <input
+                  id="skill-zip-file"
+                  ref="fileInput"
+                  class="upload-dropzone__input"
+                  type="file"
+                  accept=".zip"
+                  :aria-invalid="fileError ? 'true' : 'false'"
+                  aria-describedby="skill-zip-help skill-zip-error"
+                  @change="onFileChange"
+                />
+                <label class="upload-dropzone__trigger" for="skill-zip-file">
+                  <span class="upload-dropzone__indicator" aria-hidden="true">
+                    {{ isDraggingFile ? '↓' : selectedFileName ? '✓' : 'ZIP' }}
+                  </span>
+                  <span class="upload-dropzone__copy">
+                    <span class="upload-dropzone__title">
+                      {{ isDraggingFile ? '释放以上传' : selectedFileName ? '替换当前 ZIP' : isEditMode ? '选择新版本包' : '选择 ZIP 包' }}
+                    </span>
+                    <span id="skill-zip-help" class="upload-dropzone__hint">
+                      {{ isDraggingFile ? '仅接收一个非空 .zip 文件。' : selectedFileName ? '点击或拖入另一个 ZIP 进行替换。' : isEditMode ? '点击选择或拖入文件；不选择则沿用当前版本。' : '点击选择或拖入一个非空 .zip 文件。' }}
+                    </span>
+                  </span>
+                </label>
+
+                <div v-if="selectedFileName" class="upload-dropzone__selected-file" role="status" aria-live="polite">
+                  <span class="upload-dropzone__success" aria-hidden="true">✓</span>
+                  <span class="upload-dropzone__file-copy">
+                    <strong>{{ selectedFileName }}</strong>
+                    <small>{{ selectedFileSize }} · {{ isEditMode ? '保存后生成新版本' : '创建时随表单上传' }}</small>
+                  </span>
+                  <span class="upload-dropzone__actions">
+                    <button class="button button--ghost button--compact" type="button" @click="replaceSelectedFile">替换</button>
+                    <button class="button button--ghost button--compact upload-dropzone__remove" type="button" @click="removeSelectedFile">移除</button>
+                  </span>
+                </div>
+              </div>
+              <small
+                v-if="fileError"
+                id="skill-zip-error"
+                class="feedback feedback--error feedback--inline"
+                role="alert"
+              >{{ fileError }}</small>
             </section>
 
             <section class="form-section">
@@ -416,24 +560,32 @@ watch(
                   role="radio"
                   @click="selectScopeType(option.value)"
                 >
-                  {{ option.label }}
+                  <span class="scope-selection-mark" aria-hidden="true">✓</span>
+                  <span>{{ option.label }}</span>
                 </button>
               </div>
               <small class="scope-picker__hint">{{ selectedScopeHelp }}</small>
+              <div class="scope-summary" role="status" aria-live="polite" aria-atomic="true">
+                <span class="scope-summary__label">当前可见范围</span>
+                <strong class="scope-summary__value">{{ scopeSummary }}</strong>
+              </div>
 
               <div v-if="form.scope_type === 'GROUP'" class="field scope-target-panel">
                 <span>归属组</span>
-                <div v-if="groupOptions.length" class="scope-option-list" aria-label="归属组">
+                <div v-if="groupOptions.length" class="scope-option-list" role="radiogroup" aria-label="归属组">
                   <button
                     v-for="group in groupOptions"
                     :key="group.id"
                     type="button"
                     class="scope-option-tag"
                     :class="{ 'scope-option-tag--active': form.group_id === String(group.id) }"
+                    :aria-checked="form.group_id === String(group.id) ? 'true' : 'false'"
+                    role="radio"
                     :disabled="groupOptionsLoading"
                     @click="selectGroup(group)"
                   >
-                    {{ group.name }}
+                    <span class="scope-selection-mark" aria-hidden="true">✓</span>
+                    <span class="scope-option-label">{{ group.name }}</span>
                   </button>
                 </div>
                 <small v-if="groupOptionsLoading">正在加载可选组...</small>
@@ -443,22 +595,22 @@ watch(
 
               <div v-if="form.scope_type === 'ORGANIZATION'" class="field scope-target-panel">
                 <span>归属组织</span>
-                <div v-if="organizationOptions.length" class="scope-option-list" aria-label="归属组织">
+                <div v-if="organizationOptions.length" class="scope-option-list" role="radiogroup" aria-label="归属组织">
                   <button
                     v-for="option in organizationOptions"
                     :key="option.path"
                     type="button"
                     class="scope-option-tag"
                     :class="{ 'scope-option-tag--active': form.scope_org_path === option.path }"
+                    :aria-checked="form.scope_org_path === option.path ? 'true' : 'false'"
+                    role="radio"
                     :disabled="organizationOptionsLoading"
                     @click="selectOrganization(option)"
                   >
-                    {{ option.path }}{{ option.is_leaf ? '' : '（上级组织）' }}
+                    <span class="scope-selection-mark" aria-hidden="true">✓</span>
+                    <span class="scope-option-label">{{ option.path }}{{ option.is_leaf ? '' : '（上级组织）' }}</span>
                   </button>
                 </div>
-                <small v-if="selectedOrganization">
-                  当前选择：{{ selectedOrganization.level }} 级组织 · {{ selectedOrganization.name }}
-                </small>
                 <small v-if="organizationOptionsLoading">正在加载可选组织...</small>
                 <small v-else-if="organizationOptionsError" class="feedback feedback--error feedback--inline">{{ organizationOptionsError }}</small>
                 <small v-else-if="!organizationOptions.length">当前没有可选组织，可能该账号尚未同步 AD 组织架构。</small>

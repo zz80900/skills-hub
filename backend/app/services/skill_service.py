@@ -381,6 +381,7 @@ def to_admin_version_summary(version: SkillVersion) -> dict[str, Any]:
 def to_admin_skill_detail(skill: Skill, versions: list[SkillVersion]) -> dict[str, Any]:
     return {
         **to_skill_summary(skill),
+        "description_html": render_markdown(skill.description_markdown),
         "description_markdown": skill.description_markdown,
         "version_history": [to_admin_version_summary(version) for version in versions],
     }
@@ -411,6 +412,7 @@ def _history_versions(versions: list[SkillVersion]) -> list[str]:
 def to_public_skill_detail(skill: Skill, versions: list[SkillVersion]) -> dict[str, Any]:
     return {
         **to_public_skill_summary(skill),
+        "description_html": render_markdown(skill.description_markdown),
         "version": skill.current_version,
         "history_versions": _history_versions(versions),
         "detail_url": None,
@@ -428,7 +430,7 @@ def to_public_skill_version_detail(
         "source_label": PUBLIC_SOURCE_LOCAL_LABEL,
         "slug": skill.name,
         "name": skill.name,
-        "description_html": version.description_html,
+        "description_html": render_markdown(version.description_markdown),
         "install_command": get_install_command(skill.name),
         "installs": None,
         "version": version.version,

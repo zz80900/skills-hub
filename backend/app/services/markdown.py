@@ -2,9 +2,27 @@ import bleach
 from markdown_it import MarkdownIt
 
 
-markdown_parser = MarkdownIt("commonmark", {"html": False, "linkify": False, "typographer": False})
+markdown_parser = MarkdownIt("commonmark", {"html": False, "linkify": False, "typographer": False}).enable("table")
 allowed_tags = set(bleach.sanitizer.ALLOWED_TAGS).union(
-    {"p", "pre", "code", "h1", "h2", "h3", "h4", "h5", "h6", "img", "hr"}
+    {
+        "p",
+        "pre",
+        "code",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "img",
+        "hr",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+    }
 )
 allowed_attrs = {
     **bleach.sanitizer.ALLOWED_ATTRIBUTES,

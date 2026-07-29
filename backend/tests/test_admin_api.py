@@ -1629,6 +1629,169 @@ def test_public_local_detail_supports_history_query(client: TestClient, monkeypa
     assert "local detail" in old_payload["description_html"]
 
 
+def test_local_skill_details_rerender_markdown_when_cached_html_is_stale(client: TestClient, monkeypatch):
+    headers = auth_headers(client)
+    description_markdown = """
+| Request | Behavior |
+| --- | --- |
+| Build docs | Generate a wiki |
+""".strip()
+    create_local_skill(
+        client,
+        monkeypatch,
+        headers,
+        name="table-detail-skill",
+        description_markdown=description_markdown,
+    )
+
+    stale_html = "<p>legacy cached detail</p>"
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE skills SET description_html = :html WHERE name = :name"),
+            {"html": stale_html, "name": "table-detail-skill"},
+        )
+
+    public_response = client.get("/api/skills/local/table-detail-skill")
+    workspace_response = client.get("/api/workspace/skills/table-detail-skill", headers=headers)
+
+    assert public_response.status_code == 200
+    assert workspace_response.status_code == 200
+    for payload in (public_response.json(), workspace_response.json()):
+        assert "<table>" in payload["description_html"]
+        assert "<th>Request</th>" in payload["description_html"]
+        assert "<td>Generate a wiki</td>" in payload["description_html"]
+
+    with engine.connect() as connection:
+        cached_html = connection.execute(
+            text("SELECT description_html FROM skills WHERE name = :name"),
+            {"name": "table-detail-skill"},
+        ).scalar_one()
+    assert cached_html == stale_html
+
+
+def test_local_skill_version_detail_rerenders_version_markdown_when_cache_is_stale(
+    client: TestClient,
+    monkeypatch,
+):
+    headers = auth_headers(client)
+    description_markdown = """
+| Version | Behavior |
+| --- | --- |
+| 1.0.0 | Original table |
+""".strip()
+    create_local_skill(
+        client,
+        monkeypatch,
+        headers,
+        name="table-history-skill",
+        description_markdown=description_markdown,
+    )
+    update_response = client.put(
+        "/api/workspace/skills/table-history-skill",
+        headers=headers,
+        data={"description_markdown": "second version"},
+    )
+    assert update_response.status_code == 200
+
+    stale_html = "<p>legacy version cache</p>"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE skill_versions
+                SET description_html = :html
+                WHERE skill_id = (SELECT id FROM skills WHERE name = :name)
+                  AND version = '1.0.0'
+                """
+            ),
+            {"html": stale_html, "name": "table-history-skill"},
+        )
+
+    response = client.get("/api/skills/local/table-history-skill/versions/1.0.0")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "<table>" in payload["description_html"]
+    assert "<th>Version</th>" in payload["description_html"]
+    assert "<td>Original table</td>" in payload["description_html"]
+
+    with engine.connect() as connection:
+        cached_html = connection.execute(
+            text(
+                """
+                SELECT description_html
+                FROM skill_versions
+                WHERE skill_id = (SELECT id FROM skills WHERE name = :name)
+                  AND version = '1.0.0'
+                """
+            ),
+            {"name": "table-history-skill"},
+        ).scalar_one()
+    assert cached_html == stale_html
+
+
+def test_schema_compatibility_does_not_rewrite_cached_description_html(client: TestClient, monkeypatch):
+    headers = auth_headers(client)
+    create_local_skill(client, monkeypatch, headers, name="cache-stability-skill")
+    create_collection_record(client, monkeypatch, headers, slug="cache-stability-collection")
+
+    expected = {
+        "skills": "<p>skill cache sentinel</p>",
+        "skill_versions": "<p>skill version cache sentinel</p>",
+        "skill_collections": "<p>collection cache sentinel</p>",
+        "skill_collection_snapshots": "<p>collection snapshot cache sentinel</p>",
+    }
+    with engine.begin() as connection:
+        for table_name, value in expected.items():
+            connection.execute(text(f"UPDATE {table_name} SET description_html = :html"), {"html": value})
+
+    ensure_schema_compatibility(engine)
+
+    with engine.connect() as connection:
+        actual = {
+            table_name: connection.execute(text(f"SELECT description_html FROM {table_name} LIMIT 1")).scalar_one()
+            for table_name in expected
+        }
+    assert actual == expected
+
+
+def test_collection_create_and_update_render_markdown_tables(client: TestClient, monkeypatch):
+    headers = auth_headers(client)
+    create_markdown = """
+| Skill | Purpose |
+| --- | --- |
+| alpha | Initial collection |
+""".strip()
+    create_response = create_collection_record(
+        client,
+        monkeypatch,
+        headers,
+        slug="table-collection",
+        description_markdown=create_markdown,
+    )
+    assert "<table>" in create_response.json()["description_html"]
+    assert "<td>Initial collection</td>" in create_response.json()["description_html"]
+
+    update_markdown = """
+| Skill | Purpose |
+| --- | --- |
+| beta | Updated collection |
+""".strip()
+    update_response = client.put(
+        "/api/workspace/collections/table-collection",
+        headers=headers,
+        data={
+            "name": "Frontend Basic",
+            "description_markdown": update_markdown,
+            "scope_type": "PUBLIC",
+        },
+    )
+
+    assert update_response.status_code == 200
+    assert "<table>" in update_response.json()["description_html"]
+    assert "<td>Updated collection</td>" in update_response.json()["description_html"]
+
+
 def test_version_ceiling_returns_422(client: TestClient, monkeypatch):
     create_local_skill(client, monkeypatch, auth_headers(client), name="ceiling-skill")
 
