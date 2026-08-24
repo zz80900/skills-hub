@@ -3946,6 +3946,9 @@ def test_application_streams_skill_and_collection_packages_without_nexus_leak(cl
 
     monkeypatch.setattr(nexus_service, "open_package_stream", fake_open)
 
+    anonymous_public_skill = client.get("/api/skills/local/download-skill/package")
+    assert anonymous_public_skill.status_code == 200
+
     skill_response = client.get("/api/skills/local/download-skill/package", headers=api_key_headers)
     assert skill_response.status_code == 200
     assert skill_response.headers["content-type"] == "application/zip"
@@ -3980,6 +3983,35 @@ def test_application_streams_skill_and_collection_packages_without_nexus_leak(cl
     assert upstream_error.status_code == 502
     assert "nexus.example.invalid" not in upstream_error.text
     assert "tester" not in upstream_error.text
+
+
+def test_private_skill_package_requires_api_key(client: TestClient, monkeypatch):
+    admin_headers = auth_headers(client)
+    owner = create_user_account(client, admin_headers, "private-download-owner", "owner-pass")
+    owner_headers = auth_headers(client, "private-download-owner", "owner-pass")
+    _, owner_api_key_headers = create_api_key_headers(client, owner_headers)
+    group = create_group_record(client, admin_headers, name="Private Download Group", leader_user_id=owner["id"])
+    create_local_skill(client, monkeypatch, owner_api_key_headers, name="private-download-skill", group_id=group["id"])
+
+    monkeypatch.setattr(
+        nexus_service,
+        "open_package_stream",
+        lambda _package_url: nexus_service.NexusPackageStream(iter([b"private-package"]), "15"),
+    )
+
+    anonymous = client.get("/api/skills/local/private-download-skill/package")
+    assert anonymous.status_code == 401
+    assert "API Key" in anonymous.text
+    assert client.get(
+        "/api/skills/local/private-download-skill/package",
+        headers=owner_headers,
+    ).status_code == 401
+    authorized = client.get(
+        "/api/skills/local/private-download-skill/package",
+        headers=owner_api_key_headers,
+    )
+    assert authorized.status_code == 200
+    assert authorized.content == b"private-package"
 
 
 @pytest.mark.parametrize(
@@ -4144,13 +4176,21 @@ def test_openapi_documents_all_public_parameters_and_scope_values(client: TestCl
     for path in [
         "/api/collections/{slug}/manifest",
         "/api/collections/{slug}/package",
-        "/api/skills/local/{slug}/package",
     ]:
         parameters = schema["paths"][path]["get"]["parameters"]
         authorization = next(parameter for parameter in parameters if parameter["name"] == "Authorization")
         assert authorization["required"] is True
         assert "只接受" in authorization["description"]
         assert "JWT" in authorization["description"]
+
+    skill_package_parameters = schema["paths"]["/api/skills/local/{slug}/package"]["get"]["parameters"]
+    authorization = next(
+        parameter for parameter in skill_package_parameters if parameter["name"] == "Authorization"
+    )
+    assert authorization.get("required", False) is False
+    assert "公开 Skill 可匿名下载" in authorization["description"]
+    assert "私有 Skill" in authorization["description"]
+    assert "JWT" in authorization["description"]
 
 
 def test_mcp_transport_accepts_only_current_api_key_and_reauthenticates_each_request(client: TestClient):
@@ -4467,7 +4507,7 @@ def test_mcp_skill_crud_errors_and_download_descriptor(client: TestClient, monke
         "filename": "mcp-skill-1.0.2.zip",
         "version": "1.0.2",
         "content_type": "application/zip",
-        "requires_api_key": True,
+        "requires_api_key": False,
         "resource_uri": None,
     }
     assert "nexus" not in str(descriptor).lower()

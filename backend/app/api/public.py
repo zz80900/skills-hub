@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import DbSession, get_api_key_resource_user, get_optional_resource_user
+from app.api.deps import (
+    DbSession,
+    get_api_key_resource_user,
+    get_optional_api_key_resource_user,
+    get_optional_resource_user,
+)
 from app.core.config import get_settings
 from app.models.user import User
 from app.schemas.collection import (
@@ -169,9 +174,14 @@ async def get_local_skill_version(
 def download_local_skill_package(
     slug: str,
     session: DbSession,
-    current_user: User = Depends(get_api_key_resource_user),
+    current_user: User | None = Depends(get_optional_api_key_resource_user),
 ):
-    download = resolve_skill_download(session, current_user, slug)
+    download = resolve_skill_download(
+        session,
+        current_user,
+        slug,
+        require_api_key_for_private=True,
+    )
     return _package_stream_response(download.package_url, download.filename)
 
 

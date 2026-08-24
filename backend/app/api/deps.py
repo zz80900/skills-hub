@@ -102,6 +102,16 @@ def get_api_key_resource_user(
         )
     return user
 
+
+def get_optional_api_key_resource_user(
+    session: DbSession,
+    authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+) -> User | None:
+    if authorization is None:
+        return None
+
+    return get_api_key_resource_user(session, authorization)
+
 def _resolve_current_user(
     session: DbSession,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],

@@ -63,6 +63,7 @@ npx nexgo-skills@latest install collection frontend-basic --agent codex
 npx nexgo-skills@latest install collection frontend-basic --agent claude
 npx nexgo-skills@latest install collection frontend-basic --api-key ns-...
 npx nexgo-skills@latest install collection frontend-basic --dry-run --json
+npx nexgo-skills@latest install private-skill --api-key ns-...
 ```
 
 集合安装只接受 NEXGO API Key。CLI 会优先读取 `NEXGO_SKILLS_API_KEY`，未配置时再读取 `--api-key` 参数。请访问 `https://skills.nexgoglobal.com` 登录后获取 API Key。

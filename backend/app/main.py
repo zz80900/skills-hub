@@ -280,10 +280,17 @@ def _parameter_description(
         if path in {
             "/api/collections/{slug}/manifest",
             "/api/collections/{slug}/package",
-            "/api/skills/local/{slug}/package",
         }:
             return (
                 "必填。只接受 `Bearer ns-...` 格式的 API Key；该接口不接受登录 JWT。",
+                "Bearer ns-xxxxxxxx",
+                None,
+                None,
+            )
+        if path == "/api/skills/local/{slug}/package":
+            return (
+                "可选。公开 Skill 可匿名下载；私有 Skill 必须提供 `Bearer ns-...` 格式的 API Key，" +
+                "该接口不接受登录 JWT。",
                 "Bearer ns-xxxxxxxx",
                 None,
                 None,
@@ -416,7 +423,6 @@ def _enrich_openapi_documentation(openapi_schema: dict[str, Any]) -> None:
                     in {
                         "/api/collections/{slug}/manifest",
                         "/api/collections/{slug}/package",
-                        "/api/skills/local/{slug}/package",
                     }
                 ):
                     parameter["required"] = True

@@ -276,7 +276,16 @@ def resolve_skill_download(
     session: Session,
     actor: User | None,
     slug: str,
+    *,
+    require_api_key_for_private: bool = False,
 ) -> PackageDownloadSource:
+    if require_api_key_for_private and actor is None:
+        private_skill = get_skill_by_name(session, slug)
+        if private_skill is not None and private_skill.scope_type != SKILL_SCOPE_PUBLIC:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="该 Skill 为私有资源，请提供有效的 API Key",
+            )
     skill = get_public_skill_by_name(session, slug, actor)
     if skill is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill 不存在")
@@ -285,7 +294,7 @@ def resolve_skill_download(
         download_path=f"/api/skills/local/{quote(skill.name, safe='')}/package",
         filename=f"{skill.name}-{skill.current_version}.zip",
         version=skill.current_version,
-        requires_api_key=True,
+        requires_api_key=skill.scope_type != SKILL_SCOPE_PUBLIC,
     )
 
 
