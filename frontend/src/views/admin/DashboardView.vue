@@ -1,19 +1,17 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import SiteHeader from '../../components/SiteHeader.vue'
+import ApiKeyManagementPanel from '../../components/user-center/ApiKeyManagementPanel.vue'
 import CollectionManagementPanel from '../../components/user-center/CollectionManagementPanel.vue'
 import GroupManagementPanel from '../../components/user-center/GroupManagementPanel.vue'
 import SkillManagementPanel from '../../components/user-center/SkillManagementPanel.vue'
 import UserManagementPanel from '../../components/user-center/UserManagementPanel.vue'
-import { authState, fetchWorkspaceGroups, getUserDisplayName, getUserOrganizationLevels } from '../../services/api'
+import { authState, getUserDisplayName, getUserOrganizationLevels } from '../../services/api'
 
 const route = useRoute()
 const router = useRouter()
-const loadingGroupAccess = ref(true)
-const hasManagedGroups = ref(false)
-
 const isAdmin = computed(() => authState.user?.role === 'ADMIN')
 const userCenterLabel = computed(() => {
   if (!authState.user) {
@@ -26,10 +24,9 @@ const tabs = computed(() => {
   const items = [
     { key: 'skills', label: 'Skill 管理' },
     { key: 'collections', label: 'Skill 集合管理' },
+    { key: 'groups', label: '组管理' },
+    { key: 'api-key', label: 'API Key' },
   ]
-  if (isAdmin.value || hasManagedGroups.value) {
-    items.push({ key: 'groups', label: '组管理' })
-  }
   if (isAdmin.value) {
     items.push({ key: 'users', label: '用户管理' })
   }
@@ -42,7 +39,7 @@ const activeTab = computed(() => {
 })
 const activeTabItem = computed(() => tabs.value.find((item) => item.key === activeTab.value) || tabs.value[0])
 const roleLabel = computed(() => (isAdmin.value ? '管理员' : '成员'))
-const centerStatus = computed(() => (loadingGroupAccess.value ? '权限同步中' : roleLabel.value))
+const centerStatus = computed(() => roleLabel.value)
 const organizationLevels = computed(() => getUserOrganizationLevels(authState.user))
 
 function switchTab(nextTab) {
@@ -55,29 +52,9 @@ function switchTab(nextTab) {
   })
 }
 
-async function loadGroupAccess() {
-  if (isAdmin.value) {
-    hasManagedGroups.value = true
-    loadingGroupAccess.value = false
-    return
-  }
-
-  try {
-    const groups = await fetchWorkspaceGroups()
-    hasManagedGroups.value = groups.length > 0
-  } catch {
-    hasManagedGroups.value = false
-  } finally {
-    loadingGroupAccess.value = false
-  }
-}
-
 watch(
   tabs,
   (nextTabs) => {
-    if (loadingGroupAccess.value && !isAdmin.value) {
-      return
-    }
     const requestedTab = typeof route.query.tab === 'string' ? route.query.tab : 'skills'
     if (nextTabs.some((item) => item.key === requestedTab)) {
       return
@@ -86,10 +63,6 @@ watch(
   },
   { immediate: true },
 )
-
-onMounted(() => {
-  loadGroupAccess()
-})
 </script>
 
 <template>
@@ -131,7 +104,8 @@ onMounted(() => {
           <SkillManagementPanel v-if="activeTab === 'skills'" />
           <CollectionManagementPanel v-else-if="activeTab === 'collections'" />
           <GroupManagementPanel v-else-if="activeTab === 'groups'" />
-          <UserManagementPanel v-else />
+          <ApiKeyManagementPanel v-else-if="activeTab === 'api-key'" />
+          <UserManagementPanel v-else-if="activeTab === 'users'" />
         </div>
       </section>
     </main>

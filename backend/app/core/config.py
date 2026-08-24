@@ -45,6 +45,21 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:5173"]
     )
+    mcp_enabled: bool = True
+    mcp_allowed_hosts: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "localhost",
+            "localhost:*",
+            "127.0.0.1",
+            "127.0.0.1:*",
+            "testserver",
+        ]
+    )
+    mcp_allowed_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:*", "http://127.0.0.1:*"]
+    )
+    mcp_max_package_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
+    mcp_max_request_body_bytes: int = Field(default=32 * 1024 * 1024, gt=0)
     skills_api_base_url: str = "https://skills.sh"
     skills_api_timeout_seconds: float = 15.0
     nexgo_skills_install_command: str = DEFAULT_NEXGO_SKILLS_INSTALL_COMMAND
@@ -61,6 +76,24 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return ["http://localhost:5173"]
+
+    @field_validator("mcp_allowed_hosts", mode="before")
+    @classmethod
+    def parse_mcp_allowed_hosts(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return ["localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*", "testserver"]
+
+    @field_validator("mcp_allowed_origins", mode="before")
+    @classmethod
+    def parse_mcp_allowed_origins(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return ["http://localhost:*", "http://127.0.0.1:*"]
 
     @field_validator("nexgo_skills_install_command")
     @classmethod

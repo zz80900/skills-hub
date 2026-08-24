@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import InfoModal from '../InfoModal.vue'
 import ListState from '../ListState.vue'
+import SkillFormView from '../../views/admin/SkillFormView.vue'
 import { authState, fetchWorkspaceSkills, getSkillScopeLabel } from '../../services/api'
 
 const router = useRouter()
@@ -10,6 +12,9 @@ const loading = ref(false)
 const error = ref('')
 const search = ref('')
 const skills = ref([])
+const isFormModalOpen = ref(false)
+const editingSkillName = ref('')
+const formModalKey = ref(0)
 let searchTimer = null
 let skillQueryId = 0
 
@@ -97,6 +102,30 @@ function retryLoadSkills() {
   loadSkills(search.value.trim())
 }
 
+function openCreateSkillModal() {
+  editingSkillName.value = ''
+  formModalKey.value += 1
+  isFormModalOpen.value = true
+}
+
+function openEditSkillModal(skill) {
+  if (skill.is_deleted) {
+    return
+  }
+  editingSkillName.value = skill.name
+  formModalKey.value += 1
+  isFormModalOpen.value = true
+}
+
+function closeSkillFormModal() {
+  isFormModalOpen.value = false
+}
+
+async function handleSkillSaved() {
+  closeSkillFormModal()
+  await loadSkills(search.value.trim())
+}
+
 watch(search, (value) => {
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => {
@@ -157,7 +186,7 @@ onBeforeUnmount(() => {
     </label>
 
     <div class="operations-panel__actions">
-      <router-link class="button" to="/workspace/skills/new">新增 Skill</router-link>
+      <button class="button" type="button" @click="openCreateSkillModal">新增 Skill</button>
     </div>
   </section>
 
@@ -214,6 +243,14 @@ onBeforeUnmount(() => {
             </td>
             <td data-label="更新时间">{{ formatDate(skill.updated_at) }}</td>
             <td data-label="操作">
+              <button
+                v-if="!skill.is_deleted"
+                class="button button--ghost button--compact"
+                type="button"
+                @click="openEditSkillModal(skill)"
+              >
+                编辑
+              </button>
               <router-link class="button button--ghost button--compact" :to="`/workspace/skills/${skill.name}`">
                 打开
               </router-link>
@@ -224,4 +261,21 @@ onBeforeUnmount(() => {
       </section>
     </section>
   </ListState>
+
+  <InfoModal
+    :open="isFormModalOpen"
+    :title="editingSkillName ? '编辑 Skill' : '新增 Skill'"
+    :summary="editingSkillName ? '上传新版本或调整描述、可见范围。' : '上传 ZIP 包并填写 Skill 的基本信息。'"
+    width="1040px"
+    @close="closeSkillFormModal"
+  >
+    <SkillFormView
+      v-if="isFormModalOpen"
+      :key="formModalKey"
+      embedded
+      :skill-name="editingSkillName"
+      @close="closeSkillFormModal"
+      @saved="handleSkillSaved"
+    />
+  </InfoModal>
 </template>

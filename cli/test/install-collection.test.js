@@ -25,6 +25,19 @@ test('默认使用线上 Skill 集合服务地址', () => {
   }
 })
 
+test('命令行 token 优先于环境变量', () => {
+  const restoreToken = setEnv('NEXGO_SKILLS_TOKEN', 'ns-env-token')
+  try {
+    assert.equal(parseArgs(['install', 'collection', 'demo']).token, 'ns-env-token')
+    assert.equal(
+      parseArgs(['install', 'collection', 'demo', '--token', 'ns-cli-token']).token,
+      'ns-cli-token',
+    )
+  } finally {
+    restoreToken()
+  }
+})
+
 test('解析 Skill 集合 ZIP 并把 cmd 当作普通内容', () => {
   const zip = makeZip({
     'alpha/SKILL.md': '# alpha',
@@ -84,6 +97,109 @@ test('dry-run 输出计划且不写入目标目录', async () => {
     assert.equal(result.status, 'dry-run')
     assert.equal(result.items[0].action, 'create')
     assert.equal(await exists(path.join(workspace, 'codex-home', 'skills', 'alpha')), false)
+  } finally {
+    await registry.close()
+    restoreEnv()
+    await fs.rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('公开集合安装不发送 Authorization', async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'nexgo-cli-'))
+  const restoreEnv = setEnv('CODEX_HOME', path.join(workspace, 'codex-home'))
+  const zip = makeZip({ 'alpha/SKILL.md': '# alpha' })
+  const manifest = buildManifest('demo', zip)
+  const registry = await startAuthRegistry(manifest, zip, { expectedToken: '' })
+
+  try {
+    const result = await installCollection({
+      slug: 'demo',
+      registry: registry.url,
+      token: '',
+      version: '',
+      target: 'codex',
+      dryRun: true,
+      json: true,
+      force: false,
+    })
+
+    assert.equal(result.status, 'dry-run')
+    assert.deepEqual(registry.requests.map((request) => request.authorization), [undefined, undefined])
+  } finally {
+    await registry.close()
+    restoreEnv()
+    await fs.rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('manifest 和 package 请求发送同一个 Bearer token', async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'nexgo-cli-'))
+  const restoreEnv = setEnv('CODEX_HOME', path.join(workspace, 'codex-home'))
+  const token = 'ns-automation-token'
+  const zip = makeZip({ 'alpha/SKILL.md': '# alpha' })
+  const manifest = buildManifest('demo', zip)
+  const registry = await startAuthRegistry(manifest, zip, { expectedToken: token })
+
+  try {
+    const result = await installCollection({
+      slug: 'demo',
+      registry: registry.url,
+      token,
+      version: '',
+      target: 'codex',
+      dryRun: true,
+      json: true,
+      force: false,
+    })
+
+    assert.equal(result.status, 'dry-run')
+    assert.deepEqual(
+      registry.requests.map((request) => request.authorization),
+      [`Bearer ${token}`, `Bearer ${token}`],
+    )
+    assert.deepEqual(
+      registry.requests.map((request) => request.path),
+      ['/api/collections/demo/manifest', '/packages/demo.zip'],
+    )
+  } finally {
+    await registry.close()
+    restoreEnv()
+    await fs.rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('401 不匿名重试且错误信息不泄露 token', async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'nexgo-cli-'))
+  const restoreEnv = setEnv('CODEX_HOME', path.join(workspace, 'codex-home'))
+  const invalidToken = 'ns-invalid-secret-token'
+  const zip = makeZip({ 'alpha/SKILL.md': '# alpha' })
+  const manifest = buildManifest('demo', zip)
+  const registry = await startAuthRegistry(manifest, zip, { expectedToken: 'ns-valid-token' })
+
+  try {
+    let receivedError
+    try {
+      await installCollection({
+        slug: 'demo',
+        registry: registry.url,
+        token: invalidToken,
+        version: '',
+        target: 'codex',
+        dryRun: true,
+        json: true,
+        force: false,
+      })
+    } catch (error) {
+      receivedError = error
+    }
+
+    assert.ok(receivedError)
+    assert.match(receivedError.message, /manifest 失败：401/)
+    assert.equal(receivedError.message.includes(invalidToken), false)
+    assert.deepEqual(registry.requests, [{
+      path: '/api/collections/demo/manifest',
+      authorization: `Bearer ${invalidToken}`,
+    }])
   } finally {
     await registry.close()
     restoreEnv()
@@ -310,6 +426,43 @@ async function startRegistry(manifest, zip) {
   const address = server.address()
   return {
     url: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  }
+}
+
+async function startAuthRegistry(manifest, zip, { expectedToken }) {
+  const requests = []
+  const server = http.createServer((request, response) => {
+    const requestPath = new URL(request.url, 'http://127.0.0.1').pathname
+    requests.push({
+      path: requestPath,
+      authorization: request.headers.authorization,
+    })
+
+    const expectedAuthorization = expectedToken ? `Bearer ${expectedToken}` : undefined
+    if (request.headers.authorization !== expectedAuthorization) {
+      response.writeHead(401, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ detail: 'Unauthorized' }))
+      return
+    }
+    if (requestPath === '/api/collections/demo/manifest') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(manifest))
+      return
+    }
+    if (requestPath === '/packages/demo.zip') {
+      response.writeHead(200, { 'content-type': 'application/zip' })
+      response.end(zip)
+      return
+    }
+    response.writeHead(404)
+    response.end()
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    requests,
     close: () => new Promise((resolve) => server.close(resolve)),
   }
 }

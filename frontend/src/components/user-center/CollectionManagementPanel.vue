@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import CollectionFormView from '../../views/admin/CollectionFormView.vue'
+import InfoModal from '../InfoModal.vue'
 import ListState from '../ListState.vue'
 import { authState, fetchWorkspaceCollections, getCollectionScopeLabel } from '../../services/api'
 
@@ -10,6 +12,9 @@ const loading = ref(false)
 const error = ref('')
 const search = ref('')
 const collections = ref([])
+const isFormModalOpen = ref(false)
+const editingCollectionSlug = ref('')
+const formModalKey = ref(0)
 let searchTimer = null
 let queryId = 0
 
@@ -90,6 +95,30 @@ function retryLoadCollections() {
   loadCollections(search.value.trim())
 }
 
+function openCreateCollectionModal() {
+  editingCollectionSlug.value = ''
+  formModalKey.value += 1
+  isFormModalOpen.value = true
+}
+
+function openEditCollectionModal(collection) {
+  if (collection.is_deleted) {
+    return
+  }
+  editingCollectionSlug.value = collection.slug
+  formModalKey.value += 1
+  isFormModalOpen.value = true
+}
+
+function closeCollectionFormModal() {
+  isFormModalOpen.value = false
+}
+
+async function handleCollectionSaved() {
+  closeCollectionFormModal()
+  await loadCollections(search.value.trim())
+}
+
 watch(search, (value) => {
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => {
@@ -145,7 +174,7 @@ onBeforeUnmount(() => {
     </label>
 
     <div class="operations-panel__actions">
-      <router-link class="button" to="/workspace/collections/new">新增 Skill 集合</router-link>
+      <button class="button" type="button" @click="openCreateCollectionModal">新增 Skill 集合</button>
     </div>
   </section>
 
@@ -206,10 +235,18 @@ onBeforeUnmount(() => {
                 </span>
               </td>
               <td data-label="更新时间">{{ formatDate(collection.updated_at) }}</td>
-              <td data-label="操作">
-                <router-link class="button button--ghost button--compact" :to="`/workspace/collections/${collection.slug}`">
-                  打开
-                </router-link>
+            <td data-label="操作">
+              <button
+                v-if="!collection.is_deleted"
+                class="button button--ghost button--compact"
+                type="button"
+                @click="openEditCollectionModal(collection)"
+              >
+                编辑
+              </button>
+              <router-link class="button button--ghost button--compact" :to="`/workspace/collections/${collection.slug}`">
+                打开
+              </router-link>
               </td>
             </tr>
           </tbody>
@@ -217,4 +254,21 @@ onBeforeUnmount(() => {
       </section>
     </section>
   </ListState>
+
+  <InfoModal
+    :open="isFormModalOpen"
+    :title="editingCollectionSlug ? '编辑 Skill 集合' : '新增 Skill 集合'"
+    :summary="editingCollectionSlug ? '上传新版本或调整集合描述、可见范围。' : '上传集合 ZIP 并填写名称、slug 与可见范围。'"
+    width="1040px"
+    @close="closeCollectionFormModal"
+  >
+    <CollectionFormView
+      v-if="isFormModalOpen"
+      :key="formModalKey"
+      embedded
+      :collection-slug="editingCollectionSlug"
+      @close="closeCollectionFormModal"
+      @saved="handleCollectionSaved"
+    />
+  </InfoModal>
 </template>

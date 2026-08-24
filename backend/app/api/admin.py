@@ -64,24 +64,28 @@ def list_admin_users(
 @router.get("/groups", response_model=list[GroupSummary])
 def list_admin_groups(
     session: DbSession,
-    _: User = Depends(require_admin),
+    current_admin: User = Depends(require_admin),
 ):
-    return [GroupSummary.model_validate(to_group_summary(group)) for group in list_groups(session)]
+    return [
+        GroupSummary.model_validate(to_group_summary(group, current_admin))
+        for group in list_groups(session)
+    ]
 
 
 @router.post("/groups", response_model=GroupSummary, status_code=status.HTTP_201_CREATED)
 def create_admin_group(
     payload: GroupCreateRequest,
     session: DbSession,
-    _: User = Depends(require_admin),
+    current_admin: User = Depends(require_admin),
 ):
     group = create_group(
         session,
+        current_admin,
         name=payload.name,
         description=payload.description,
         leader_user_id=payload.leader_user_id,
     )
-    return GroupSummary.model_validate(to_group_summary(group))
+    return GroupSummary.model_validate(to_group_summary(group, current_admin))
 
 
 @router.put("/groups/{group_id}", response_model=GroupSummary)
@@ -89,7 +93,7 @@ def update_admin_group(
     group_id: int,
     payload: GroupUpdateRequest,
     session: DbSession,
-    _: User = Depends(require_admin),
+    current_admin: User = Depends(require_admin),
 ):
     group = get_group_by_id(session, group_id)
     if group is None:
@@ -98,24 +102,25 @@ def update_admin_group(
     provided_fields = payload.model_fields_set
     group = update_group(
         session,
+        current_admin,
         group,
         name=payload.name if "name" in provided_fields else UNSET,
         description=payload.description if "description" in provided_fields else UNSET,
         leader_user_id=payload.leader_user_id if "leader_user_id" in provided_fields else UNSET,
     )
-    return GroupSummary.model_validate(to_group_summary(group))
+    return GroupSummary.model_validate(to_group_summary(group, current_admin))
 
 
 @router.delete("/groups/{group_id}", response_model=MessageResponse)
 def delete_admin_group(
     group_id: int,
     session: DbSession,
-    _: User = Depends(require_admin),
+    current_admin: User = Depends(require_admin),
 ):
     group = get_group_by_id(session, group_id)
     if group is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户组不存在")
-    delete_group(session, group)
+    delete_group(session, current_admin, group)
     return MessageResponse(message="用户组已删除")
 
 

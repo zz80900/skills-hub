@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models.group import Group, GroupMembership
+from app.models.group import GROUP_MEMBERSHIP_ACTIVE, Group, GroupMembership
 from app.models.skill import SKILL_SCOPE_GROUP, SKILL_SCOPE_ORGANIZATION, SKILL_SCOPE_PUBLIC
 from app.models.user import User
 from app.services.group_service import resolve_group_for_skill_binding
@@ -69,12 +69,23 @@ def apply_public_visibility_filter(statement, model, actor: User | None):
         .where(
             GroupMembership.group_id == model.group_id,
             GroupMembership.user_id == actor.id,
+            GroupMembership.status == GROUP_MEMBERSHIP_ACTIVE,
+        )
+        .exists()
+    )
+    leader_exists = (
+        select(Group.id)
+        .where(
+            Group.id == model.group_id,
+            Group.leader_user_id == actor.id,
         )
         .exists()
     )
     org_paths = actor_organization_paths(actor)
     visibility_conditions = [model.scope_type == SKILL_SCOPE_PUBLIC]
-    visibility_conditions.append((model.scope_type == SKILL_SCOPE_GROUP) & membership_exists)
+    visibility_conditions.append(
+        (model.scope_type == SKILL_SCOPE_GROUP) & or_(leader_exists, membership_exists)
+    )
     for path in org_paths:
         visibility_conditions.append(
             (model.scope_type == SKILL_SCOPE_ORGANIZATION)

@@ -233,7 +233,7 @@ Skill 卡展示来源、名称、版本、描述摘要和下一步动作。背�
 
 ### Detail Modal / Detail Page
 
-详情区优先展示描述、安装命令、版本、贡献者、来源和下载地址。命令片段使用深色 `command-snippet`，复制反馈要明确。Markdown 内容保持可读行长，代码块允许横向滚动而不强行换行。
+详情区优先展示描述、版本、贡献者、来源和下载地址。本地 Skill 展示安装命令，命令片段使用深色 `command-snippet` 且复制反馈要明确；`skills.sh` Skill 不展示本地 CLI 命令，只提供前往官方详情页查看安装方式的入口。Markdown 内容保持可读行长，代码块允许横向滚动而不强行换行。
 
 ### Workspace Panels
 

@@ -20,6 +20,10 @@ const props = defineProps({
     type: String,
     default: '760px',
   },
+  variant: {
+    type: String,
+    default: '',
+  },
 })
 
 const emit = defineEmits(['close'])
@@ -39,7 +43,10 @@ const { dialogRef, handleBackdropClick } = useModalLifecycle(() => props.open, c
       <div v-if="open" class="detail-modal" @click="handleBackdropClick">
         <div
           ref="dialogRef"
-          class="detail-modal__dialog detail-modal__dialog--compact"
+          :class="[
+            'detail-modal__dialog detail-modal__dialog--compact',
+            variant === 'api-key' ? 'api-key-modal' : '',
+          ]"
           :style="{ width }"
           role="dialog"
           aria-modal="true"

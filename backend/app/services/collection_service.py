@@ -185,16 +185,22 @@ def parse_collection_zip(content: bytes) -> ParsedCollectionZip:
     return ParsedCollectionZip(items=items)
 
 
-async def validate_collection_zip_file(upload_file: UploadFile) -> tuple[bytes, ParsedCollectionZip]:
-    filename = upload_file.filename or ""
+def validate_collection_zip_bytes(
+    content: bytes,
+    filename: str = "package.zip",
+) -> tuple[bytes, ParsedCollectionZip]:
     if not filename.lower().endswith(".zip"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="只支持上传 ZIP 压缩包")
 
-    content = await upload_file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="上传的 ZIP 文件不能为空")
 
     return content, parse_collection_zip(content)
+
+
+async def validate_collection_zip_file(upload_file: UploadFile) -> tuple[bytes, ParsedCollectionZip]:
+    content = await upload_file.read()
+    return validate_collection_zip_bytes(content, upload_file.filename or "")
 
 
 def build_internal_manifest(

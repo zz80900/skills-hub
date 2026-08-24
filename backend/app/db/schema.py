@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.security import hash_password
 from app.db.base import Base
+from app.models.group import GROUP_MEMBERSHIP_ACTIVE
 from app.models.user import Role, User, USER_SOURCE_LOCAL
 from app.services.user_service import ROLE_ADMIN, ROLE_USER
 
@@ -34,6 +35,20 @@ USER_COLUMNS = {
     "org_level_4": "ALTER TABLE users ADD COLUMN org_level_4 VARCHAR(128)",
     "org_path": "ALTER TABLE users ADD COLUMN org_path VARCHAR(512)",
     "org_depth": "ALTER TABLE users ADD COLUMN org_depth INTEGER",
+    "api_key_hash": "ALTER TABLE users ADD COLUMN api_key_hash VARCHAR(64)",
+    "api_key_suffix": "ALTER TABLE users ADD COLUMN api_key_suffix VARCHAR(12)",
+    "api_key_issued_at": "ALTER TABLE users ADD COLUMN api_key_issued_at TIMESTAMP WITH TIME ZONE",
+}
+
+GROUP_COLUMNS = {
+    "created_by_user_id": "ALTER TABLE groups ADD COLUMN created_by_user_id INTEGER",
+}
+
+GROUP_MEMBERSHIP_COLUMNS = {
+    "status": f"ALTER TABLE group_memberships ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT '{GROUP_MEMBERSHIP_ACTIVE}'",
+    "invited_by_user_id": "ALTER TABLE group_memberships ADD COLUMN invited_by_user_id INTEGER",
+    "invited_at": "ALTER TABLE group_memberships ADD COLUMN invited_at TIMESTAMP WITH TIME ZONE",
+    "resolved_at": "ALTER TABLE group_memberships ADD COLUMN resolved_at TIMESTAMP WITH TIME ZONE",
 }
 
 
@@ -47,7 +62,13 @@ def ensure_schema_compatibility(engine: Engine) -> None:
     Base.metadata.tables["skill_collection_snapshots"].create(bind=engine, checkfirst=True)
     inspector = inspect(engine)
     _ensure_user_columns(engine, inspector)
+    _ensure_user_api_key_index(engine)
     _backfill_user_sources(engine)
+    _ensure_group_columns(engine)
+    _ensure_group_membership_columns(engine)
+    _backfill_group_metadata(engine)
+    _ensure_group_indexes(engine)
+    _ensure_group_leader_memberships(engine)
 
     default_admin_id = _ensure_access_control_seed_data(engine)
     table_names = set(inspector.get_table_names())
@@ -58,7 +79,6 @@ def ensure_schema_compatibility(engine: Engine) -> None:
     _backfill_skill_versions(engine)
     _backfill_skill_owners(engine, default_admin_id)
     _backfill_skill_scope_types(engine)
-    _ensure_group_leader_memberships(engine)
     _ensure_skill_name_uniqueness_policy(engine)
     _ensure_skill_indexes(engine)
 
@@ -95,6 +115,95 @@ def _ensure_user_columns(engine: Engine, inspector) -> None:
         if all(name in refreshed_column_names for name in missing_columns):
             return
         raise
+
+
+def _ensure_user_api_key_index(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_users_api_key_hash
+                ON users (api_key_hash)
+                WHERE api_key_hash IS NOT NULL
+                """
+            )
+        )
+
+
+def _ensure_group_columns(engine: Engine) -> None:
+    table_names = set(inspect(engine).get_table_names())
+    if "groups" not in table_names:
+        return
+    column_names = {column["name"] for column in inspect(engine).get_columns("groups")}
+    missing_columns = {name: ddl for name, ddl in GROUP_COLUMNS.items() if name not in column_names}
+    if not missing_columns:
+        return
+    try:
+        with engine.begin() as connection:
+            for ddl in missing_columns.values():
+                connection.execute(text(ddl))
+    except SQLAlchemyError:
+        refreshed = {column["name"] for column in inspect(engine).get_columns("groups")}
+        if all(name in refreshed for name in missing_columns):
+            return
+        raise
+
+
+def _ensure_group_membership_columns(engine: Engine) -> None:
+    table_names = set(inspect(engine).get_table_names())
+    if "group_memberships" not in table_names:
+        return
+    column_names = {column["name"] for column in inspect(engine).get_columns("group_memberships")}
+    missing_columns = {
+        name: ddl for name, ddl in GROUP_MEMBERSHIP_COLUMNS.items() if name not in column_names
+    }
+    if not missing_columns:
+        return
+    try:
+        with engine.begin() as connection:
+            for ddl in missing_columns.values():
+                connection.execute(text(ddl))
+    except SQLAlchemyError:
+        refreshed = {column["name"] for column in inspect(engine).get_columns("group_memberships")}
+        if all(name in refreshed for name in missing_columns):
+            return
+        raise
+
+
+def _backfill_group_metadata(engine: Engine) -> None:
+    table_names = set(inspect(engine).get_table_names())
+    if "groups" not in table_names or "group_memberships" not in table_names:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE groups
+                SET created_by_user_id = leader_user_id
+                WHERE created_by_user_id IS NULL
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE group_memberships
+                SET status = :active
+                WHERE status IS NULL OR TRIM(status) = ''
+                """
+            ),
+            {"active": GROUP_MEMBERSHIP_ACTIVE},
+        )
+
+
+def _ensure_group_indexes(engine: Engine) -> None:
+    table_names = set(inspect(engine).get_table_names())
+    if "groups" not in table_names or "group_memberships" not in table_names:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_groups_created_by_user_id ON groups (created_by_user_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_group_memberships_group_status ON group_memberships (group_id, status)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_group_memberships_user_status ON group_memberships (user_id, status)"))
 
 
 def _backfill_user_sources(engine: Engine) -> None:
@@ -268,8 +377,8 @@ def _ensure_group_leader_memberships(engine: Engine) -> None:
         connection.execute(
             text(
                 """
-                INSERT INTO group_memberships (group_id, user_id, created_at)
-                SELECT groups.id, groups.leader_user_id, CURRENT_TIMESTAMP
+                INSERT INTO group_memberships (group_id, user_id, status, created_at)
+                SELECT groups.id, groups.leader_user_id, :active, CURRENT_TIMESTAMP
                 FROM groups
                 LEFT JOIN group_memberships
                     ON group_memberships.group_id = groups.id
@@ -277,7 +386,23 @@ def _ensure_group_leader_memberships(engine: Engine) -> None:
                 WHERE groups.leader_user_id IS NOT NULL
                   AND group_memberships.id IS NULL
                 """
-            )
+            ),
+            {"active": GROUP_MEMBERSHIP_ACTIVE},
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE group_memberships
+                SET status = :active
+                WHERE group_memberships.user_id = (
+                    SELECT groups.leader_user_id
+                    FROM groups
+                    WHERE groups.id = group_memberships.group_id
+                )
+                  AND (status IS NULL OR TRIM(status) = '' OR status <> :active)
+                """
+            ),
+            {"active": GROUP_MEMBERSHIP_ACTIVE},
         )
 
 

@@ -58,6 +58,12 @@ function buildUrl(path, params) {
   return API_BASE ? url.toString() : `${path}${url.search}`
 }
 
+export function buildAbsoluteUrl(path, params) {
+  const url = new URL(buildUrl(path, params), window.location.origin)
+  url.pathname = url.pathname.replace(/\/{2,}/g, '/')
+  return url.toString()
+}
+
 function normalizeContributor(value) {
   if (typeof value === 'string') {
     return value
@@ -469,6 +475,24 @@ export async function fetchCurrentUser() {
   return normalizeUserPayload(await request(buildUrl('/api/auth/me'), { authMode: AUTH_MODE_REQUIRED }))
 }
 
+export function fetchApiKeyStatus() {
+  return request(buildUrl('/api/auth/api-key'), { authMode: AUTH_MODE_REQUIRED })
+}
+
+export function createApiKey() {
+  return request(buildUrl('/api/auth/api-key'), {
+    method: 'POST',
+    authMode: AUTH_MODE_REQUIRED,
+  })
+}
+
+export function rotateApiKey() {
+  return request(buildUrl('/api/auth/api-key/rotate'), {
+    method: 'POST',
+    authMode: AUTH_MODE_REQUIRED,
+  })
+}
+
 export async function fetchWorkspaceSkills(query) {
   return (
     await request(buildUrl('/api/workspace/skills', { q: query }), { authMode: AUTH_MODE_REQUIRED })
@@ -613,6 +637,29 @@ export async function fetchWorkspaceGroups() {
   return await request(buildUrl('/api/workspace/groups'), { authMode: AUTH_MODE_REQUIRED })
 }
 
+export async function createWorkspaceGroup(payload) {
+  return await request(buildUrl('/api/workspace/groups'), {
+    method: 'POST',
+    authMode: AUTH_MODE_REQUIRED,
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateWorkspaceGroup(groupId, payload) {
+  return await request(buildUrl(`/api/workspace/groups/${encodeURIComponent(groupId)}`), {
+    method: 'PUT',
+    authMode: AUTH_MODE_REQUIRED,
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteWorkspaceGroup(groupId) {
+  return await request(buildUrl(`/api/workspace/groups/${encodeURIComponent(groupId)}`), {
+    method: 'DELETE',
+    authMode: AUTH_MODE_REQUIRED,
+  })
+}
+
 export async function fetchGroupOptions() {
   return await request(buildUrl('/api/workspace/groups/options'), { authMode: AUTH_MODE_REQUIRED })
 }
@@ -625,6 +672,39 @@ export async function fetchOrganizationOptions() {
 
 export async function fetchGroupMemberOptions() {
   return await request(buildUrl('/api/workspace/groups/member-options'), { authMode: AUTH_MODE_REQUIRED })
+}
+
+export async function fetchGroupInvitations() {
+  return await request(buildUrl('/api/workspace/group-invitations'), { authMode: AUTH_MODE_REQUIRED })
+}
+
+export async function acceptGroupInvitation(membershipId) {
+  return await request(buildUrl(`/api/workspace/group-invitations/${encodeURIComponent(membershipId)}/accept`), {
+    method: 'POST',
+    authMode: AUTH_MODE_REQUIRED,
+  })
+}
+
+export async function rejectGroupInvitation(membershipId) {
+  return await request(buildUrl(`/api/workspace/group-invitations/${encodeURIComponent(membershipId)}/reject`), {
+    method: 'POST',
+    authMode: AUTH_MODE_REQUIRED,
+  })
+}
+
+export async function cancelGroupInvitation(groupId, userId) {
+  return await request(buildUrl(`/api/workspace/groups/${encodeURIComponent(groupId)}/invitations/${encodeURIComponent(userId)}/cancel`), {
+    method: 'POST',
+    authMode: AUTH_MODE_REQUIRED,
+  })
+}
+
+export async function transferGroupLeader(groupId, leaderUserId) {
+  return await request(buildUrl(`/api/workspace/groups/${encodeURIComponent(groupId)}/leader`), {
+    method: 'PUT',
+    authMode: AUTH_MODE_REQUIRED,
+    body: JSON.stringify({ leader_user_id: leaderUserId }),
+  })
 }
 
 export async function updateGroupMembers(groupId, userIds) {
@@ -641,6 +721,10 @@ export async function addGroupMember(groupId, userId) {
     authMode: AUTH_MODE_REQUIRED,
     body: JSON.stringify({ user_id: userId }),
   })
+}
+
+export async function inviteGroupMember(groupId, userId) {
+  return await addGroupMember(groupId, userId)
 }
 
 export async function removeGroupMember(groupId, userId) {

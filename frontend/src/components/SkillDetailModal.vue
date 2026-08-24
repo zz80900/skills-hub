@@ -82,7 +82,12 @@ const { dialogRef, handleBackdropClick } = useModalLifecycle(() => props.open, c
                   <dd><code>{{ skill.source_repository }}</code></dd>
                 </div>
               </dl>
-              <CommandSnippet label="安装命令" :command="skill.install_command" compact />
+              <CommandSnippet
+                v-if="skill.install_command"
+                label="安装命令"
+                :command="skill.install_command"
+                compact
+              />
               <a
                 v-if="skill.detail_url"
                 class="detail-source-link"
@@ -90,7 +95,7 @@ const { dialogRef, handleBackdropClick } = useModalLifecycle(() => props.open, c
                 target="_blank"
                 rel="noreferrer"
               >
-                打开原始详情
+                前往 skills.sh 查看安装方式
               </a>
             </div>
           </header>

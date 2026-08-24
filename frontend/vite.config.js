@@ -63,6 +63,14 @@ export default defineConfig(async ({ command, mode }) => {
           target: apiTarget,
           changeOrigin: true,
         },
+        '/docs': {
+          target: apiTarget,
+          changeOrigin: true,
+        },
+        '/openapi.json': {
+          target: apiTarget,
+          changeOrigin: true,
+        },
       },
     },
   }

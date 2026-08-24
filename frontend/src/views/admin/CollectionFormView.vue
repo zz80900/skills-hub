@@ -13,10 +13,22 @@ import {
   updateCollection,
 } from '../../services/api'
 
+const props = defineProps({
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
+  collectionSlug: {
+    type: String,
+    default: '',
+  },
+})
+const emit = defineEmits(['close', 'saved'])
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const route = useRoute()
 const router = useRouter()
-const isEditMode = computed(() => Boolean(route.params.slug))
+const targetCollectionSlug = computed(() => props.collectionSlug || (typeof route.params.slug === 'string' ? route.params.slug : ''))
+const isEditMode = computed(() => Boolean(targetCollectionSlug.value))
 const isAdmin = computed(() => authState.user?.role === 'ADMIN')
 const loading = ref(false)
 const submitting = ref(false)
@@ -285,7 +297,7 @@ async function loadCollection() {
   loading.value = true
   error.value = ''
   try {
-    const collection = await fetchWorkspaceCollection(route.params.slug)
+    const collection = await fetchWorkspaceCollection(targetCollectionSlug.value)
     form.name = collection.name
     form.slug = collection.slug
     form.description_markdown = collection.description_markdown
@@ -332,8 +344,12 @@ async function handleSubmit() {
       if (form.zip_file) {
         payload.append('zip_file', form.zip_file)
       }
-      await updateCollection(route.params.slug, payload)
-      router.push(`/workspace/collections/${validatedSlug}`)
+      await updateCollection(targetCollectionSlug.value, payload)
+      if (props.embedded) {
+        emit('saved', { slug: validatedSlug })
+      } else {
+        router.push(`/workspace/collections/${validatedSlug}`)
+      }
     } else {
       payload.append('slug', validatedSlug)
       if (!form.zip_file) {
@@ -342,13 +358,21 @@ async function handleSubmit() {
       }
       payload.append('zip_file', form.zip_file)
       const createdCollection = await createCollection(payload)
-      router.push(`/workspace/collections/${createdCollection.slug}`)
+      if (props.embedded) {
+        emit('saved', { slug: createdCollection.slug })
+      } else {
+        router.push(`/workspace/collections/${createdCollection.slug}`)
+      }
     }
   } catch (err) {
     error.value = err.message
   } finally {
     submitting.value = false
   }
+}
+
+function closeForm() {
+  emit('close')
 }
 
 onMounted(() => {
@@ -375,11 +399,11 @@ watch(
 </script>
 
 <template>
-  <div class="page-shell">
-    <SiteHeader />
-    <main class="page-content page-content--skill-form">
-      <section class="skill-form-shell">
-        <aside class="skill-form-rail">
+  <div class="page-shell" :class="{ 'page-shell--embedded': embedded }">
+    <SiteHeader v-if="!embedded" />
+    <main class="page-content page-content--skill-form" :class="{ 'page-content--embedded': embedded }">
+      <section class="skill-form-shell" :class="{ 'skill-form-shell--embedded': embedded }">
+        <aside v-if="!embedded" class="skill-form-rail">
           <div class="skill-form-rail__heading">
             <h1>{{ isEditMode ? '编辑 Skill 集合' : '新增 Skill 集合' }}</h1>
             <span>{{ isAdmin ? '工作台' : '我的 Skill 集合' }}</span>
@@ -578,7 +602,10 @@ watch(
                 <button class="button" :disabled="submitting" type="submit">
                   {{ submitting ? '提交中...' : isEditMode ? '保存 Skill 集合' : '创建 Skill 集合' }}
                 </button>
-                <router-link class="button button--ghost" :to="isEditMode ? `/workspace/collections/${form.slug}` : '/workspace?tab=collections'">
+                <button v-if="embedded" class="button button--ghost" type="button" @click="closeForm">
+                  取消
+                </button>
+                <router-link v-else class="button button--ghost" :to="isEditMode ? `/workspace/collections/${form.slug}` : '/workspace?tab=collections'">
                   {{ isEditMode ? '返回详情' : '返回列表' }}
                 </router-link>
               </div>

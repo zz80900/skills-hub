@@ -6,6 +6,7 @@ pydantic-settings==2.13.1
 python-multipart==0.0.22
 PyJWT==2.12.1
 httpx==0.28.1
+mcp==2.0.0
 markdown-it-py==4.0.0
 bleach==6.3.0
 pytest==9.0.2

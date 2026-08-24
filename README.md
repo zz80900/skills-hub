@@ -4,9 +4,9 @@
 
 ## 功能
 
-- 首页展示 Skills 列表，并在使用教程中提示 Node.js / npx 前置条件
+- 首页分别展示本地 Skills 与只读的 skills.sh 外部目录，并为本地安装提示 Node.js / npx 前置条件
 - 支持按 Skill 名称和描述搜索
-- Skill 详情页展示 Markdown 描述、安装命令和 ZIP 下载地址
+- 本地 Skill 详情展示 Markdown 描述、安装命令和 ZIP 下载地址；skills.sh 详情提供官方页面安装入口
 - 采用基础 RBAC0 权限模型，固定角色为管理员和普通用户
 - 管理员账号由系统启动时自动种子化，支持后台创建本地用户、分配角色、停启账号和重置密码
 - 登录时优先匹配本地用户；本地不存在时可切换到 AD 域 Kerberos + LDAP 认证，并自动建普通用户
@@ -61,8 +61,11 @@ frontend-basic.zip
 npx nexgo-skills@latest install collection frontend-basic
 npx nexgo-skills@latest install collection frontend-basic --agent codex
 npx nexgo-skills@latest install collection frontend-basic --agent claude
+npx nexgo-skills@latest install collection frontend-basic --api-key ns-...
 npx nexgo-skills@latest install collection frontend-basic --dry-run --json
 ```
+
+集合安装只接受 NEXGO API Key。CLI 会优先读取 `NEXGO_SKILLS_API_KEY`，未配置时再读取 `--api-key` 参数。请访问 `https://skills.nexgoglobal.com` 登录后获取 API Key。
 
 CLI 会先获取 Skill 集合 manifest，再下载 ZIP 并校验每个 Skill checksum。安装写入目标 Agent 的 Skill 目录；若任意步骤失败，会删除本次新增目录并恢复被覆盖目录。
 
@@ -94,6 +97,52 @@ Copy-Item ".env.example" ".env"
 ```powershell
 ".venv/Scripts/uvicorn" "app.main:app" --reload --host 0.0.0.0 --port 8000
 ```
+
+## OpenAPI 与 MCP
+
+后端同时保留两类入口：
+
+- REST/OpenAPI：`/api/*`，Swagger UI 为 `/docs`，规范文件为 `/openapi.json`
+- MCP：`/mcp`，使用 Streamable HTTP；该入口不会出现在 OpenAPI 文档中
+
+MCP 客户端必须支持远程 Streamable HTTP，并允许为每个 HTTP 请求配置静态 `Authorization` Header。只支持 stdio、旧 SSE，或不能设置自定义 Header 的客户端不能直接连接该入口。
+
+匿名连接可以浏览公开 Skill/集合元数据。需要查看当前账号可管理资源、预览压缩包或执行创建、更新、删除时，先在登录后的账号设置中创建 API Key，再按下面的形式配置客户端：
+
+```json
+{
+  "url": "http://localhost:8000/mcp",
+  "headers": {
+    "Authorization": "Bearer ns-替换为当前API-Key"
+  }
+}
+```
+
+- MCP 只接受当前有效的 `ns-` API Key，不接受登录 JWT
+- API Key 明文只在创建或轮转成功时返回一次；每个用户只保留一个 Key，轮转后旧 Key 立即失效
+- 未携带 `Authorization` 时按匿名处理；显式提供畸形、无效、已轮转或停用账号的 Key 时返回 HTTP `401`
+- 不会从 URL 查询参数、Cookie、工具参数或 `X-API-Key` 等自定义 Header 读取 Key
+
+MCP 工具目录：
+
+- 公开读取：`nexgo_skills_search`、`nexgo_skill_get`、`nexgo_skill_download`、`nexgo_collections_list`、`nexgo_collection_get`、`nexgo_collection_manifest_get`、`nexgo_collection_download`
+- 管理读取：`nexgo_managed_skills_list`、`nexgo_managed_skill_get`、`nexgo_managed_collections_list`、`nexgo_managed_collection_get`
+- Skill 变更：`nexgo_skill_create`、`nexgo_skill_update`、`nexgo_skill_delete`
+- 集合变更：`nexgo_collection_preview`、`nexgo_collection_create`、`nexgo_collection_update`、`nexgo_collection_delete`
+
+下载采用两步流程：先调用 MCP 下载工具取得应用内 `download_path`、文件名、版本和 `requires_api_key`，再对该 REST 路径发起 GET。`requires_api_key=true` 时，下载请求必须再次携带同一个当前有效的 API Key；公开包可以匿名下载。MCP 结果和下载 URL 都不会包含 API Key、Nexus 凭证或 Nexus 原始地址。
+
+MCP 创建、更新和集合预览使用严格 Base64 的 `package_base64`。默认解码后包上限为 20 MiB，MCP HTTP 请求体上限为 32 MiB；更大的包应改用现有 OpenAPI multipart 工作台接口。相关配置如下：
+
+```dotenv
+MCP_ENABLED=true
+MCP_ALLOWED_HOSTS=localhost,localhost:*,127.0.0.1,127.0.0.1:*
+MCP_ALLOWED_ORIGINS=http://localhost:*,http://127.0.0.1:*
+MCP_MAX_PACKAGE_BYTES=20971520
+MCP_MAX_REQUEST_BODY_BYTES=33554432
+```
+
+生产环境必须把 Host/Origin allowlist 改为实际域名和来源；临时回滚可设置 `MCP_ENABLED=false`，不会影响 REST、前端、CLI 或已创建的 API Key。
 
 ## 启动前端
 

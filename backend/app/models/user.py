@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression
 
@@ -23,6 +23,15 @@ class Role(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index(
+            "uq_users_api_key_hash",
+            "api_key_hash",
+            unique=True,
+            sqlite_where=text("api_key_hash IS NOT NULL"),
+            postgresql_where=text("api_key_hash IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
@@ -43,6 +52,9 @@ class User(Base):
     org_level_4: Mapped[str | None] = mapped_column(String(128), nullable=True)
     org_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     org_depth: Mapped[int | None] = mapped_column(nullable=True)
+    api_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    api_key_suffix: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    api_key_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -68,4 +80,11 @@ class User(Base):
         back_populates="leader",
         foreign_keys="Group.leader_user_id",
     )
-    group_memberships: Mapped[list["GroupMembership"]] = relationship(back_populates="user")
+    created_groups: Mapped[list["Group"]] = relationship(
+        back_populates="creator",
+        foreign_keys="Group.created_by_user_id",
+    )
+    group_memberships: Mapped[list["GroupMembership"]] = relationship(
+        back_populates="user",
+        foreign_keys="GroupMembership.user_id",
+    )

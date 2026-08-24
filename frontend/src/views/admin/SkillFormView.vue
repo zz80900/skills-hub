@@ -5,10 +5,22 @@ import { useRoute, useRouter } from 'vue-router'
 import SiteHeader from '../../components/SiteHeader.vue'
 import { authState, createSkill, fetchGroupOptions, fetchOrganizationOptions, fetchWorkspaceSkill, updateSkill } from '../../services/api'
 
+const props = defineProps({
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
+  skillName: {
+    type: String,
+    default: '',
+  },
+})
+const emit = defineEmits(['close', 'saved'])
 const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const route = useRoute()
 const router = useRouter()
-const isEditMode = computed(() => Boolean(route.params.name))
+const targetSkillName = computed(() => props.skillName || (typeof route.params.name === 'string' ? route.params.name : ''))
+const isEditMode = computed(() => Boolean(targetSkillName.value))
 const isAdmin = computed(() => authState.user?.role === 'ADMIN')
 const loading = ref(false)
 const submitting = ref(false)
@@ -312,7 +324,7 @@ async function loadSkill() {
   loading.value = true
   error.value = ''
   try {
-    const skill = await fetchWorkspaceSkill(route.params.name)
+    const skill = await fetchWorkspaceSkill(targetSkillName.value)
     form.name = skill.name
     form.contributor = skill.contributor || ''
     form.description_markdown = skill.description_markdown
@@ -358,7 +370,11 @@ async function handleSubmit() {
         payload.append('zip_file', form.zip_file)
       }
       await updateSkill(validatedName, payload)
-      router.push(`/workspace/skills/${validatedName}`)
+      if (props.embedded) {
+        emit('saved', { name: validatedName })
+      } else {
+        router.push(`/workspace/skills/${validatedName}`)
+      }
     } else {
       payload.append('name', validatedName)
       if (!form.zip_file) {
@@ -367,7 +383,11 @@ async function handleSubmit() {
       }
       payload.append('zip_file', form.zip_file)
       const createdSkill = await createSkill(payload)
-      router.push(`/workspace/skills/${createdSkill.name}`)
+      if (props.embedded) {
+        emit('saved', { name: createdSkill.name })
+      } else {
+        router.push(`/workspace/skills/${createdSkill.name}`)
+      }
     }
   } catch (err) {
     if (!fileError.value || fileError.value !== err.message) {
@@ -376,6 +396,10 @@ async function handleSubmit() {
   } finally {
     submitting.value = false
   }
+}
+
+function closeForm() {
+  emit('close')
 }
 
 onMounted(() => {
@@ -402,11 +426,11 @@ watch(
 </script>
 
 <template>
-  <div class="page-shell">
-    <SiteHeader />
-    <main class="page-content page-content--skill-form">
-      <section class="skill-form-shell">
-        <aside class="skill-form-rail">
+  <div class="page-shell" :class="{ 'page-shell--embedded': embedded }">
+    <SiteHeader v-if="!embedded" />
+    <main class="page-content page-content--skill-form" :class="{ 'page-content--embedded': embedded }">
+      <section class="skill-form-shell" :class="{ 'skill-form-shell--embedded': embedded }">
+        <aside v-if="!embedded" class="skill-form-rail">
           <div class="skill-form-rail__heading">
             <h1>{{ isEditMode ? '编辑 Skill' : '新增 Skill' }}</h1>
             <span>{{ isAdmin ? '工作台' : '我的 Skill' }}</span>
@@ -640,7 +664,10 @@ watch(
                 <button class="button" :disabled="submitting" type="submit">
                   {{ submitting ? '提交中...' : isEditMode ? '保存并升级' : '创建 Skill' }}
                 </button>
-                <router-link class="button button--ghost" :to="isEditMode ? `/workspace/skills/${form.name}` : '/workspace'">
+                <button v-if="embedded" class="button button--ghost" type="button" @click="closeForm">
+                  取消
+                </button>
+                <router-link v-else class="button button--ghost" :to="isEditMode ? `/workspace/skills/${form.name}` : '/workspace'">
                   {{ isEditMode ? '返回详情' : '返回列表' }}
                 </router-link>
               </div>

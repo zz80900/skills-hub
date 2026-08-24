@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -45,3 +47,15 @@ class LoginResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class ApiKeyStatusResponse(BaseModel):
+    has_api_key: bool
+    masked_key: str | None = None
+    issued_at: datetime | None = None
+
+
+class ApiKeyIssuedResponse(BaseModel):
+    api_key: str
+    masked_key: str
+    issued_at: datetime

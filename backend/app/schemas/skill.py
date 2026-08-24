@@ -11,7 +11,7 @@ class PublicSkillSummary(BaseModel):
     slug: str
     name: str
     description_html: str
-    install_command: str
+    install_command: str | None = None
     installs: int | None = None
     version: str | None = None
     contributor: str | None = None
@@ -54,10 +54,11 @@ class PublicSkillDetail(BaseModel):
     slug: str
     name: str
     description_html: str
-    install_command: str
+    install_command: str | None = None
     installs: int | None = None
     detail_url: str | None = None
     source_repository: str | None = None
+    package_url: str | None = None
     version: str | None = None
     contributor: str | None = None
     history_versions: list[str] = Field(default_factory=list)

@@ -94,15 +94,13 @@ def _validate_skill_md_entry(archive: zipfile.ZipFile, root_files: dict[str, zip
         _raise_zip_validation_error(ZIP_SKILL_MD_BLANK_DETAIL)
 
 
-async def validate_zip_file(upload_file: UploadFile) -> bytes:
-    filename = upload_file.filename or ""
+def validate_skill_zip_bytes(content: bytes, filename: str = "package.zip") -> bytes:
     if not filename.lower().endswith(".zip"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="只支持上传 ZIP 压缩包",
         )
 
-    content = await upload_file.read()
     if not content:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -120,6 +118,11 @@ async def validate_zip_file(upload_file: UploadFile) -> bytes:
         ) from exc
 
     return content
+
+
+async def validate_zip_file(upload_file: UploadFile) -> bytes:
+    content = await upload_file.read()
+    return validate_skill_zip_bytes(content, upload_file.filename or "")
 
 
 def get_install_command(skill_name: str) -> str:
@@ -417,6 +420,7 @@ def to_public_skill_detail(skill: Skill, versions: list[SkillVersion]) -> dict[s
         "history_versions": _history_versions(versions),
         "detail_url": None,
         "source_repository": None,
+        "package_url": f"/api/skills/local/{skill.name}/package",
     }
 
 
@@ -440,6 +444,11 @@ def to_public_skill_version_detail(
         "history_versions": _history_versions(versions),
         "detail_url": None,
         "source_repository": None,
+        "package_url": (
+            f"/api/skills/local/{skill.name}/package"
+            if version.version == skill.current_version
+            else None
+        ),
     }
 
 

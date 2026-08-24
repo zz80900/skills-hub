@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRouter } from 'vue-router'
 
 import ConfirmDialog from '../ConfirmDialog.vue'
+import InfoModal from '../InfoModal.vue'
 import ListState from '../ListState.vue'
 import {
   authState,
@@ -206,10 +207,11 @@ async function loadMoreUsers() {
 }
 
 async function handleSubmit() {
+  const wasEditMode = isEditMode.value
   submitting.value = true
   formError.value = ''
   try {
-    if (isEditMode.value) {
+    if (wasEditMode) {
       await updateUser(editingUserId.value, {
         username: form.username,
         role: form.role,
@@ -224,7 +226,7 @@ async function handleSubmit() {
       })
     }
     closeUserModal()
-    notifySuccess(isEditMode.value ? '用户信息已保存' : '用户已创建')
+    notifySuccess(wasEditMode ? '用户信息已保存' : '用户已创建')
     await loadUsers({ page: 1, query: search.value })
   } catch (err) {
     if (err.message && err.message.includes('挑战')) {
@@ -502,14 +504,16 @@ onBeforeUnmount(() => {
       </p>
       </ListState>
     </section>
+  </section>
 
-    <aside v-if="isUserModalOpen" class="admin-panel identity-editor-panel">
-      <div class="section-heading">
-        <h2>{{ modalTitle }}</h2>
-        <span class="status-chip">{{ modalSummary }}</span>
-      </div>
-
-      <form class="form-card form-card--flat" @submit.prevent="handleSubmit">
+  <InfoModal
+    :open="isUserModalOpen"
+    :title="modalTitle"
+    :summary="modalSummary"
+    width="640px"
+    @close="closeUserModal"
+  >
+      <form class="form-card form-card--flat modal-form" @submit.prevent="handleSubmit">
         <label class="field">
           <span>用户名</span>
           <input v-model="form.username" class="text-input" type="text" :disabled="isEditingAdUser" />
@@ -536,8 +540,7 @@ onBeforeUnmount(() => {
           <button class="button button--ghost" type="button" @click="closeUserModal">取消</button>
         </div>
       </form>
-    </aside>
-  </section>
+  </InfoModal>
 
   <ConfirmDialog
     :open="pendingAction?.type === 'toggle-user'"

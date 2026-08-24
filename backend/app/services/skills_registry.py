@@ -12,7 +12,6 @@ from urllib.parse import urljoin
 import httpx
 
 from app.core.config import get_settings
-from app.services.install_command import build_skill_install_command
 from app.services.markdown import sanitize_html
 
 
@@ -36,7 +35,6 @@ class RegistrySkillSummary:
     source: str
     installs: int | None
     description_html: str
-    install_command: str
 
 
 @dataclass(slots=True)
@@ -46,7 +44,6 @@ class RegistrySkillDetail:
     source: str
     installs: int | None
     description_html: str
-    install_command: str
     detail_url: str
 
 
@@ -121,11 +118,6 @@ class SkillsHomepageParser(HTMLParser):
         return fallback_name
 
 
-def build_remote_install_command(skill_ref: str) -> str:
-    skill_ref = skill_ref.strip().strip("/")
-    return build_skill_install_command(skill_ref)
-
-
 def _paginate(items: list[RegistrySkillSummary], page: int, page_size: int) -> tuple[list[RegistrySkillSummary], bool]:
     start = max(page - 1, 0) * page_size
     end = start + page_size
@@ -141,7 +133,6 @@ def _normalize_remote_record(slug: str, source: str, name: str, installs: int | 
         source=normalized_source,
         installs=installs,
         description_html=_build_summary_html(normalized_source, installs),
-        install_command=build_remote_install_command(slug),
     )
 
 
@@ -364,7 +355,6 @@ async def get_remote_skill_detail(slug: str) -> RegistrySkillDetail:
         source=source,
         installs=installs,
         description_html=description_html,
-        install_command=build_remote_install_command(normalized_slug),
         detail_url=detail_url,
     )
 
@@ -376,7 +366,7 @@ def to_public_skill_summary(skill: RegistrySkillSummary) -> dict[str, Any]:
         "slug": skill.slug,
         "name": skill.name,
         "description_html": skill.description_html,
-        "install_command": skill.install_command,
+        "install_command": None,
         "installs": skill.installs,
     }
 
@@ -390,7 +380,6 @@ def to_public_skill_detail(skill: RegistrySkillDetail) -> dict[str, Any]:
                 source=skill.source,
                 installs=skill.installs,
                 description_html=skill.description_html,
-                install_command=skill.install_command,
             )
         ),
         "detail_url": skill.detail_url,

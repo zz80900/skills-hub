@@ -105,7 +105,7 @@ async function handleLogout() {
     <section class="guide-modal__section">
       <h3>1. 准备 Node.js</h3>
       <ol class="info-modal__list">
-        <li>Skill 安装命令通过 npx 执行，请先安装 Node.js 18 及以上版本。</li>
+        <li>本地 Skill 和 Skill 集合的安装命令通过 npx 执行，请先安装 Node.js 18 及以上版本。</li>
         <li>如果本机已经可以执行 node 和 npx，可以直接进入下一步。</li>
       </ol>
     </section>
@@ -114,7 +114,7 @@ async function handleLogout() {
       <h3>2. 浏览 Skill</h3>
       <ol class="info-modal__list">
         <li>在首页浏览本地库与 skills.sh，点击卡片查看详情。</li>
-        <li>在详情页复制 Skill 安装命令，直接执行即可。</li>
+        <li>本地 Skill 可在详情页复制安装命令；skills.sh Skill 请前往官方详情页查看安装方式。</li>
       </ol>
     </section>
 
