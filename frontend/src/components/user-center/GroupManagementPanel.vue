@@ -591,7 +591,11 @@ onMounted(() => {
     </div>
   </section>
 
-  <section class="group-invitation-panel" aria-labelledby="group-invitation-title">
+  <section
+    v-if="invitations.length || invitationError"
+    class="group-invitation-panel"
+    aria-labelledby="group-invitation-title"
+  >
     <div class="group-invitation-panel__header">
       <div>
         <h2 id="group-invitation-title">待处理邀请</h2>
@@ -603,12 +607,6 @@ onMounted(() => {
     <section v-if="invitationError" class="feedback feedback--error group-invitation-panel__feedback" aria-live="polite">
       <span>{{ invitationError }}</span>
       <button class="button button--ghost" type="button" @click="retryInvitations">重试</button>
-    </section>
-    <section v-else-if="loading && !invitations.length" class="feedback group-invitation-panel__feedback">
-      正在同步待处理邀请...
-    </section>
-    <section v-else-if="!invitations.length" class="group-invitation-empty">
-      当前没有待处理邀请。别人发出的邀请会显示在这里，不会提前计入你的有效组。
     </section>
     <div v-else class="group-invitation-list">
       <article v-for="invitation in invitations" :key="invitation.membership_id" class="group-invitation-row">
