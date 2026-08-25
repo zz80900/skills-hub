@@ -456,7 +456,7 @@ def accept_group_invitation(session: Session, actor: User, membership_id: int) -
         select(GroupMembership)
         .where(GroupMembership.id == membership_id)
         .options(selectinload(GroupMembership.group))
-        .with_for_update()
+        .with_for_update(of=GroupMembership)
     )
     if membership is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="邀请不存在")
