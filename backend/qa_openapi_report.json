@@ -1,0 +1,493 @@
+{
+  "base_url": "http://127.0.0.1:8000",
+  "zip_path": "C:\\Users\\xiejincheng\\.codex\\skills\\auto-comment\\auto-comment.zip",
+  "skill_name": "qa-openapi-skill-1787556243",
+  "collection_slug": "qa-openapi-collection-1787556243",
+  "results": [
+    {
+      "name": "OpenAPI schema",
+      "method": "GET",
+      "path": "/openapi.json",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 70776,
+      "note": "schema"
+    },
+    {
+      "name": "OpenAPI operation count",
+      "method": "ASSERT",
+      "path": "-",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 0,
+      "note": "schema declares 22 expected operations"
+    },
+    {
+      "name": "Admin login",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 430,
+      "note": "setup"
+    },
+    {
+      "name": "Admin token",
+      "method": "ASSERT",
+      "path": "-",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 0,
+      "note": "default admin token issued"
+    },
+    {
+      "name": "Current user",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 217,
+      "note": "setup"
+    },
+    {
+      "name": "API Key status",
+      "method": "GET",
+      "path": "/api/auth/api-key",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 112,
+      "note": "setup"
+    },
+    {
+      "name": "API Key create",
+      "method": "POST",
+      "path": "/api/auth/api-key",
+      "template": null,
+      "status": 409,
+      "expected": [
+        201,
+        409
+      ],
+      "ok": true,
+      "bytes": 66,
+      "note": "setup; 409 means an existing key is retained"
+    },
+    {
+      "name": "API Key rotate",
+      "method": "POST",
+      "path": "/api/auth/api-key/rotate",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 153,
+      "note": "setup"
+    },
+    {
+      "name": "API Key response",
+      "method": "ASSERT",
+      "path": "-",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 0,
+      "note": "one-time API Key response after rotation"
+    },
+    {
+      "name": "List local library",
+      "method": "GET",
+      "path": "/api/local-library",
+      "template": "/api/local-library",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 16244,
+      "note": ""
+    },
+    {
+      "name": "List local skills",
+      "method": "GET",
+      "path": "/api/skills/local",
+      "template": "/api/skills/local",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 16229,
+      "note": ""
+    },
+    {
+      "name": "List collections",
+      "method": "GET",
+      "path": "/api/collections",
+      "template": "/api/collections",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 12,
+      "note": ""
+    },
+    {
+      "name": "List skills",
+      "method": "GET",
+      "path": "/api/skills",
+      "template": "/api/skills",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 16398,
+      "note": ""
+    },
+    {
+      "name": "List skills.sh",
+      "method": "GET",
+      "path": "/api/skills/skills_sh",
+      "template": "/api/skills/skills_sh",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 377,
+      "note": ""
+    },
+    {
+      "name": "Create skill",
+      "method": "POST",
+      "path": "/api/workspace/skills",
+      "template": "/api/workspace/skills",
+      "status": 201,
+      "expected": [
+        201
+      ],
+      "ok": true,
+      "bytes": 653,
+      "note": ""
+    },
+    {
+      "name": "Skill create payload",
+      "method": "ASSERT",
+      "path": "-",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 0,
+      "note": "created skill name matches"
+    },
+    {
+      "name": "List workspace skills",
+      "method": "GET",
+      "path": "/api/workspace/skills",
+      "template": "/api/workspace/skills",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 17397,
+      "note": ""
+    },
+    {
+      "name": "Get workspace skill",
+      "method": "GET",
+      "path": "/api/workspace/skills/qa-openapi-skill-1787556243",
+      "template": "/api/workspace/skills/{name}",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 653,
+      "note": ""
+    },
+    {
+      "name": "Update skill metadata and package",
+      "method": "PUT",
+      "path": "/api/workspace/skills/qa-openapi-skill-1787556243",
+      "template": "/api/workspace/skills/{name}",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 732,
+      "note": ""
+    },
+    {
+      "name": "Get local skill detail",
+      "method": "GET",
+      "path": "/api/skills/local/qa-openapi-skill-1787556243",
+      "template": "/api/skills/{source}/{slug}",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 461,
+      "note": ""
+    },
+    {
+      "name": "Get local skill version",
+      "method": "GET",
+      "path": "/api/skills/local/qa-openapi-skill-1787556243/versions/1.0.1",
+      "template": "/api/skills/local/{slug}/versions/{version}",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 461,
+      "note": ""
+    },
+    {
+      "name": "Download local skill package",
+      "method": "GET",
+      "path": "/api/skills/local/qa-openapi-skill-1787556243/package",
+      "template": "/api/skills/local/{slug}/package",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 5299,
+      "note": ""
+    },
+    {
+      "name": "Skill package bytes",
+      "method": "ASSERT",
+      "path": "-",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 0,
+      "note": "downloaded Skill ZIP equals uploaded ZIP"
+    },
+    {
+      "name": "Preview collection ZIP",
+      "method": "POST",
+      "path": "/api/workspace/collections/preview",
+      "template": "/api/workspace/collections/preview",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 181,
+      "note": ""
+    },
+    {
+      "name": "Collection preview",
+      "method": "ASSERT",
+      "path": "-",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 0,
+      "note": "preview contains auto-comment item"
+    },
+    {
+      "name": "Create collection",
+      "method": "POST",
+      "path": "/api/workspace/collections",
+      "template": "/api/workspace/collections",
+      "status": 201,
+      "expected": [
+        201
+      ],
+      "ok": true,
+      "bytes": 1286,
+      "note": ""
+    },
+    {
+      "name": "Collection create payload",
+      "method": "ASSERT",
+      "path": "-",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 0,
+      "note": "created collection slug matches"
+    },
+    {
+      "name": "List workspace collections",
+      "method": "GET",
+      "path": "/api/workspace/collections",
+      "template": "/api/workspace/collections",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 1206,
+      "note": ""
+    },
+    {
+      "name": "Get workspace collection",
+      "method": "GET",
+      "path": "/api/workspace/collections/qa-openapi-collection-1787556243",
+      "template": "/api/workspace/collections/{slug}",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 1286,
+      "note": ""
+    },
+    {
+      "name": "Update collection metadata and package",
+      "method": "PUT",
+      "path": "/api/workspace/collections/qa-openapi-collection-1787556243",
+      "template": "/api/workspace/collections/{slug}",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 1410,
+      "note": ""
+    },
+    {
+      "name": "Get public collection",
+      "method": "GET",
+      "path": "/api/collections/qa-openapi-collection-1787556243",
+      "template": "/api/collections/{slug}",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 1026,
+      "note": ""
+    },
+    {
+      "name": "Get collection manifest",
+      "method": "GET",
+      "path": "/api/collections/qa-openapi-collection-1787556243/manifest",
+      "template": "/api/collections/{slug}/manifest",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 385,
+      "note": ""
+    },
+    {
+      "name": "Collection manifest",
+      "method": "ASSERT",
+      "path": "-",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 0,
+      "note": "manifest contains collection item"
+    },
+    {
+      "name": "Download collection package",
+      "method": "GET",
+      "path": "/api/collections/qa-openapi-collection-1787556243/package",
+      "template": "/api/collections/{slug}/package",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 5009,
+      "note": ""
+    },
+    {
+      "name": "Collection package bytes",
+      "method": "ASSERT",
+      "path": "-",
+      "template": null,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true,
+      "bytes": 0,
+      "note": "downloaded collection ZIP equals uploaded ZIP"
+    },
+    {
+      "name": "Delete collection cleanup",
+      "method": "DELETE",
+      "path": "/api/workspace/collections/qa-openapi-collection-1787556243",
+      "template": "/api/workspace/collections/{slug}",
+      "status": 200,
+      "expected": [
+        200,
+        404
+      ],
+      "ok": true,
+      "bytes": 35,
+      "note": "cleanup"
+    },
+    {
+      "name": "Delete skill cleanup",
+      "method": "DELETE",
+      "path": "/api/workspace/skills/qa-openapi-skill-1787556243",
+      "template": "/api/workspace/skills/{name}",
+      "status": 200,
+      "expected": [
+        200,
+        404
+      ],
+      "ok": true,
+      "bytes": 29,
+      "note": "cleanup"
+    }
+  ],
+  "missing_openapi_operations": []
+}
